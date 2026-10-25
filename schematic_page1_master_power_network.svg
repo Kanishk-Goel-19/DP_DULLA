@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1100" width="1600" height="1100" font-family="Courier, 'Courier New', monospace">
+  <!-- Clean White Sheet with Simple Human-Style CAD Border -->
+  <rect x="0" y="0" width="1600" height="1100" fill="#ffffff"/>
+  <rect x="35" y="35" width="1530" height="1030" fill="none" stroke="#1e293b" stroke-width="2"/>
+
+  <!-- Simple Sheet Heading -->
+  <text x="65" y="80" fill="#0f172a" font-size="18" font-weight="bold">Sheet 1: Power Supply, Buck-LDO Regulation &amp; Master ESP32</text>
+  <line x1="65" y1="95" x2="730" y2="95" stroke="#94a3b8" stroke-width="1.5"/>
+
+  <!-- ===================================================================== -->
+  <!-- 1. 24V 30A SMPS POWER SUPPLY (TOP LEFT)                               -->
+  <!-- ===================================================================== -->
+  <text x="80" y="155" fill="#334155" font-size="14" font-weight="bold">24V 30A SMPS Power Supply</text>
+
+  <!-- J1: AC Input -->
+  <rect x="80" y="195" width="115" height="150" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="137" y="185" fill="#0f172a" font-size="13" font-weight="bold" text-anchor="middle">J1 (AC IN)</text>
+  <text x="182" y="235" fill="#0f172a" font-size="12" text-anchor="end">L</text>
+  <text x="182" y="275" fill="#0f172a" font-size="12" text-anchor="end">N</text>
+  <text x="182" y="315" fill="#0f172a" font-size="12" text-anchor="end">PE</text>
+
+  <line x1="195" y1="231" x2="280" y2="231" stroke="#0f172a" stroke-width="2"/>
+  <line x1="195" y1="271" x2="280" y2="271" stroke="#0f172a" stroke-width="2"/>
+  <line x1="195" y1="311" x2="280" y2="311" stroke="#0f172a" stroke-width="2"/>
+
+  <!-- PSU1: 24V 30A SMPS -->
+  <rect x="280" y="180" width="250" height="185" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="405" y="168" fill="#0f172a" font-size="14" font-weight="bold" text-anchor="middle">PSU1: 24V 30A SMPS</text>
+
+  <text x="295" y="235" fill="#0f172a" font-size="12">AC_L</text>
+  <text x="295" y="275" fill="#0f172a" font-size="12">AC_N</text>
+  <text x="295" y="315" fill="#0f172a" font-size="12">FG</text>
+
+  <text x="515" y="240" fill="#dc2626" font-size="12" font-weight="bold" text-anchor="end">V+ (24V)</text>
+  <text x="515" y="310" fill="#0f172a" font-size="12" font-weight="bold" text-anchor="end">V- (GND)</text>
+
+  <!-- Net Labels: +24V_BUS and GND -->
+  <line x1="530" y1="236" x2="620" y2="236" stroke="#dc2626" stroke-width="2"/>
+  <polygon points="620,223 735,223 750,236 735,249 620,249" fill="#ffffff" stroke="#dc2626" stroke-width="2"/>
+  <text x="680" y="240" fill="#dc2626" font-size="12" font-weight="bold" text-anchor="middle">+24V_BUS</text>
+
+  <line x1="530" y1="306" x2="620" y2="306" stroke="#0f172a" stroke-width="2"/>
+  <polygon points="620,293 735,293 750,306 735,319 620,319" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="680" y="310" fill="#0f172a" font-size="12" font-weight="bold" text-anchor="middle">GND</text>
+
+  <!-- ===================================================================== -->
+  <!-- 2. 24V -> 5V BUCK -> 3.3V LDO REGULATION (BOTTOM LEFT)                -->
+  <!-- ===================================================================== -->
+  <text x="80" y="510" fill="#334155" font-size="14" font-weight="bold">24V -&gt; 5V Buck &amp; 5V -&gt; 3.3V LDO</text>
+
+  <!-- +24V_BUS Input Net Label -->
+  <polygon points="80,613 190,613 205,626 190,639 80,639" fill="#ffffff" stroke="#dc2626" stroke-width="2"/>
+  <text x="138" y="630" fill="#dc2626" font-size="12" font-weight="bold" text-anchor="middle">+24V_BUS</text>
+  <line x1="205" y1="626" x2="255" y2="626" stroke="#dc2626" stroke-width="2"/>
+
+  <!-- U4: 24V-5V Buck -->
+  <rect x="255" y="575" width="190" height="145" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="350" y="562" fill="#0f172a" font-size="14" font-weight="bold" text-anchor="middle">U4: 24V-5V BUCK</text>
+  <text x="270" y="630" fill="#dc2626" font-size="12" font-weight="bold">VIN</text>
+  <text x="270" y="695" fill="#0f172a" font-size="12">GND</text>
+  <text x="432" y="630" fill="#d97706" font-size="12" font-weight="bold" text-anchor="end">VOUT (5V)</text>
+
+  <line x1="295" y1="720" x2="295" y2="795" stroke="#0f172a" stroke-width="2"/>
+  <circle cx="295" cy="795" r="4" fill="#0f172a"/>
+
+  <!-- 5V Tap to +5V_BUCK Net Label -->
+  <line x1="445" y1="626" x2="520" y2="626" stroke="#d97706" stroke-width="2"/>
+  <circle cx="482" cy="626" r="4" fill="#d97706"/>
+  <line x1="482" y1="626" x2="482" y2="515" stroke="#d97706" stroke-width="2"/>
+  <line x1="482" y1="515" x2="620" y2="515" stroke="#d97706" stroke-width="2"/>
+  <polygon points="620,502 735,502 750,515 735,528 620,528" fill="#ffffff" stroke="#d97706" stroke-width="2"/>
+  <text x="680" y="519" fill="#b45309" font-size="12" font-weight="bold" text-anchor="middle">+5V_BUCK</text>
+
+  <!-- U5: 5V-3.3V LDO -->
+  <rect x="520" y="575" width="190" height="145" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="615" y="562" fill="#0f172a" font-size="14" font-weight="bold" text-anchor="middle">U5: 5V-3.3V LDO</text>
+  <text x="535" y="630" fill="#d97706" font-size="12" font-weight="bold">VIN</text>
+  <text x="535" y="695" fill="#0f172a" font-size="12">GND</text>
+  <text x="698" y="655" fill="#0284c7" font-size="12" font-weight="bold" text-anchor="end">VOUT (3.3V)</text>
+
+  <line x1="560" y1="720" x2="560" y2="795" stroke="#0f172a" stroke-width="2"/>
+  <circle cx="560" cy="795" r="4" fill="#0f172a"/>
+
+  <!-- +3V3_LDO Net Label -->
+  <line x1="710" y1="651" x2="755" y2="651" stroke="#0284c7" stroke-width="2"/>
+  <polygon points="755,638 870,638 885,651 870,664 755,664" fill="#ffffff" stroke="#0284c7" stroke-width="2"/>
+  <text x="815" y="655" fill="#0284c7" font-size="12" font-weight="bold" text-anchor="middle">+3V3_LDO</text>
+
+  <!-- Common Ground Line -->
+  <line x1="230" y1="795" x2="620" y2="795" stroke="#0f172a" stroke-width="2"/>
+  <polygon points="620,782 735,782 750,795 735,808 620,808" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="680" y="799" fill="#0f172a" font-size="12" font-weight="bold" text-anchor="middle">GND</text>
+
+  <!-- ===================================================================== -->
+  <!-- 3. MASTER ESP32 (U1) & ESP-NOW NETWORK (RIGHT SIDE)                   -->
+  <!-- ===================================================================== -->
+  <text x="930" y="155" fill="#334155" font-size="14" font-weight="bold">Master ESP32 (Web Server &amp; ESP-NOW)</text>
+
+  <!-- +3V3_LDO and GND into U1 -->
+  <polygon points="930,258 1045,258 1060,271 1045,284 930,284" fill="#ffffff" stroke="#0284c7" stroke-width="2"/>
+  <text x="990" y="275" fill="#0284c7" font-size="12" font-weight="bold" text-anchor="middle">+3V3_LDO</text>
+  <line x1="1060" y1="271" x2="1125" y2="271" stroke="#0284c7" stroke-width="2"/>
+
+  <polygon points="930,358 1045,358 1060,371 1045,384 930,384" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="990" y="375" fill="#0f172a" font-size="12" font-weight="bold" text-anchor="middle">GND</text>
+  <line x1="1060" y1="371" x2="1125" y2="371" stroke="#0f172a" stroke-width="2"/>
+
+  <!-- U1: ESP32 Master -->
+  <rect x="1125" y="200" width="290" height="230" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="1270" y="185" fill="#0f172a" font-size="14" font-weight="bold" text-anchor="middle">U1: ESP32 (Master)</text>
+
+  <text x="1140" y="275" fill="#0284c7" font-size="12" font-weight="bold">3V3</text>
+  <text x="1140" y="375" fill="#0f172a" font-size="12" font-weight="bold">GND</text>
+
+  <text x="1400" y="275" fill="#0f172a" font-size="12" text-anchor="end">Wi-Fi Web Server</text>
+  <text x="1400" y="325" fill="#0284c7" font-size="12" text-anchor="end">ESP-NOW TX / RX</text>
+
+  <!-- Simple Wireless Link Diagram -->
+  <text x="930" y="535" fill="#334155" font-size="14" font-weight="bold">ESP-NOW Wireless Topology</text>
+
+  <rect x="930" y="575" width="180" height="90" fill="#ffffff" stroke="#0f172a" stroke-width="1.8"/>
+  <text x="1020" y="612" fill="#0f172a" font-size="12" font-weight="bold" text-anchor="middle">Web App UI</text>
+  <text x="1020" y="636" fill="#475569" font-size="11" text-anchor="middle">(Browser over Wi-Fi)</text>
+
+  <line x1="1110" y1="620" x2="1175" y2="620" stroke="#0284c7" stroke-width="2" stroke-dasharray="6,4"/>
+
+  <rect x="1175" y="575" width="150" height="90" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="1250" y="615" fill="#0f172a" font-size="12" font-weight="bold" text-anchor="middle">U1: ESP32</text>
+  <text x="1250" y="637" fill="#0284c7" font-size="11" text-anchor="middle">(Master Node)</text>
+
+  <line x1="1325" y1="595" x2="1390" y2="565" stroke="#0284c7" stroke-width="2" stroke-dasharray="6,4"/>
+  <line x1="1325" y1="645" x2="1390" y2="675" stroke="#0284c7" stroke-width="2" stroke-dasharray="6,4"/>
+
+  <rect x="1390" y="525" width="145" height="70" fill="#ffffff" stroke="#0f172a" stroke-width="1.8"/>
+  <text x="1462" y="555" fill="#0f172a" font-size="12" font-weight="bold" text-anchor="middle">U2: ESP32</text>
+  <text x="1462" y="577" fill="#475569" font-size="11" text-anchor="middle">(Top Hub)</text>
+
+  <rect x="1390" y="645" width="145" height="70" fill="#ffffff" stroke="#0f172a" stroke-width="1.8"/>
+  <text x="1462" y="675" fill="#0f172a" font-size="12" font-weight="bold" text-anchor="middle">U3: ESP32</text>
+  <text x="1462" y="697" fill="#475569" font-size="11" text-anchor="middle">(Cycling)</text>
+</svg>

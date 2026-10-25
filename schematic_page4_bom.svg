@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1100" width="1600" height="1100" font-family="Courier, 'Courier New', monospace">
+  <!-- Clean White Sheet with Simple Human-Style CAD Border -->
+  <rect x="0" y="0" width="1600" height="1100" fill="#ffffff"/>
+  <rect x="35" y="35" width="1530" height="1030" fill="none" stroke="#1e293b" stroke-width="2"/>
+
+  <!-- Simple Sheet Heading -->
+  <text x="65" y="85" fill="#0f172a" font-size="20" font-weight="bold">Sheet 4: Bill of Materials (BOM)</text>
+  <line x1="65" y1="102" x2="1535" y2="102" stroke="#1e293b" stroke-width="1.5"/>
+
+  <!-- Table Header -->
+  <rect x="65" y="125" width="1470" height="42" fill="#f1f5f9" stroke="#0f172a" stroke-width="1.8"/>
+  <text x="85" y="151" fill="#0f172a" font-size="13" font-weight="bold">REF DES</text>
+  <text x="240" y="151" fill="#0f172a" font-size="13" font-weight="bold">COMPONENT</text>
+  <text x="660" y="151" fill="#0f172a" font-size="13" font-weight="bold">QTY</text>
+  <text x="740" y="151" fill="#0f172a" font-size="13" font-weight="bold">SPECIFICATION / DESCRIPTION</text>
+
+  <!-- Table Outer Box & Vertical Dividers -->
+  <rect x="65" y="167" width="1470" height="840" fill="none" stroke="#0f172a" stroke-width="1.8"/>
+  <line x1="220" y1="125" x2="220" y2="1007" stroke="#94a3b8" stroke-width="1.2"/>
+  <line x1="640" y1="125" x2="640" y2="1007" stroke="#94a3b8" stroke-width="1.2"/>
+  <line x1="720" y1="125" x2="720" y2="1007" stroke="#94a3b8" stroke-width="1.2"/>
+
+  <!-- Row 1: PSU1 -->
+  <text x="85" y="198" fill="#0f172a" font-size="12" font-weight="bold">PSU1</text>
+  <text x="240" y="198" fill="#0f172a" font-size="12">24V 30A SMPS Power Supply</text>
+  <text x="672" y="198" fill="#0f172a" font-size="12">1</text>
+  <text x="740" y="198" fill="#334155" font-size="12">24V DC, 30A (720W) Switching Power Supply (Sheet 1)</text>
+  <line x1="65" y1="212" x2="1535" y2="212" stroke="#cbd5e1" stroke-width="1"/>
+
+  <!-- Row 2: U4 -->
+  <text x="85" y="242" fill="#0f172a" font-size="12" font-weight="bold">U4</text>
+  <text x="240" y="242" fill="#0f172a" font-size="12">24V-to-5V Buck Converter</text>
+  <text x="672" y="242" fill="#0f172a" font-size="12">1</text>
+  <text x="740" y="242" fill="#334155" font-size="12">Steps down 24V bus to 5V for Encoders &amp; LDO input (Sheet 1)</text>
+  <line x1="65" y1="256" x2="1535" y2="256" stroke="#cbd5e1" stroke-width="1"/>
+
+  <!-- Row 3: U5 -->
+  <text x="85" y="286" fill="#0f172a" font-size="12" font-weight="bold">U5</text>
+  <text x="240" y="286" fill="#0f172a" font-size="12">5V-to-3.3V LDO Regulator</text>
+  <text x="672" y="286" fill="#0f172a" font-size="12">1</text>
+  <text x="740" y="286" fill="#334155" font-size="12">Linear regulator converting 5V to 3.3V for ESP32s (Sheet 1)</text>
+  <line x1="65" y1="300" x2="1535" y2="300" stroke="#cbd5e1" stroke-width="1"/>
+
+  <!-- Row 4: U1, U2, U3 -->
+  <text x="85" y="330" fill="#0f172a" font-size="12" font-weight="bold">U1, U2, U3</text>
+  <text x="240" y="330" fill="#0f172a" font-size="12">ESP32 Microcontroller</text>
+  <text x="672" y="330" fill="#0f172a" font-size="12">3</text>
+  <text x="740" y="330" fill="#334155" font-size="12">U1: Master Web Server, U2: Top Hub, U3: Cycling (ESP-NOW)</text>
+  <line x1="65" y1="344" x2="1535" y2="344" stroke="#cbd5e1" stroke-width="1"/>
+
+  <!-- Row 5: U201 -->
+  <text x="85" y="374" fill="#0f172a" font-size="12" font-weight="bold">U201</text>
+  <text x="240" y="374" fill="#0f172a" font-size="12">Rhino MD20Amp Motor Driver</text>
+  <text x="672" y="374" fill="#0f172a" font-size="12">1</text>
+  <text x="740" y="374" fill="#334155" font-size="12">6V-30V, 20A Single-Channel DC Motor Driver (Sheet 2)</text>
+  <line x1="65" y1="388" x2="1535" y2="388" stroke="#cbd5e1" stroke-width="1"/>
+
+  <!-- Row 6: M1 -->
+  <text x="85" y="418" fill="#0f172a" font-size="12" font-weight="bold">M1</text>
+  <text x="240" y="418" fill="#0f172a" font-size="12">E-Bike DC Motor MY1016</text>
+  <text x="672" y="418" fill="#0f172a" font-size="12">1</text>
+  <text x="740" y="418" fill="#334155" font-size="12">24V DC, 250W, 2750 RPM Permanent Magnet DC Motor (Sheet 2)</text>
+  <line x1="65" y1="432" x2="1535" y2="432" stroke="#cbd5e1" stroke-width="1"/>
+
+  <!-- Row 7: GBX1 + STOP1 -->
+  <text x="85" y="462" fill="#0f172a" font-size="12" font-weight="bold">GBX1, STOP1</text>
+  <text x="240" y="462" fill="#0f172a" font-size="12">1:52 Gearbox &amp; Hard Stop</text>
+  <text x="672" y="462" fill="#0f172a" font-size="12">1</text>
+  <text x="740" y="462" fill="#334155" font-size="12">1:52 reduction gearbox on M1 + mechanical zero stop (Sheet 2)</text>
+  <line x1="65" y1="476" x2="1535" y2="476" stroke="#cbd5e1" stroke-width="1"/>
+
+  <!-- Row 8: U202 -->
+  <text x="85" y="506" fill="#0f172a" font-size="12" font-weight="bold">U202</text>
+  <text x="240" y="506" fill="#0f172a" font-size="12">30A Heatbed MOSFET Module</text>
+  <text x="672" y="506" fill="#0f172a" font-size="12">1</text>
+  <text x="740" y="506" fill="#334155" font-size="12">3D Printer 30A MOSFET module for PWM brake chopper (Sheet 2)</text>
+  <line x1="65" y1="520" x2="1535" y2="520" stroke="#cbd5e1" stroke-width="1"/>
+
+  <!-- Row 9: R1, R2 -->
+  <text x="85" y="550" fill="#0f172a" font-size="12" font-weight="bold">R1, R2</text>
+  <text x="240" y="550" fill="#0f172a" font-size="12">2 Ohm 100W Braking Resistors</text>
+  <text x="672" y="550" fill="#0f172a" font-size="12">2</text>
+  <text x="740" y="550" fill="#334155" font-size="12">Ceramic aluminum-shell resistors wired in parallel (Sheet 2)</text>
+  <line x1="65" y1="564" x2="1535" y2="564" stroke="#cbd5e1" stroke-width="1"/>
+
+  <!-- Row 10: ENC1, ENC2 -->
+  <text x="85" y="594" fill="#0f172a" font-size="12" font-weight="bold">ENC1, ENC2</text>
+  <text x="240" y="594" fill="#0f172a" font-size="12">360 PPR Optical Encoder</text>
+  <text x="672" y="594" fill="#0f172a" font-size="12">2</text>
+  <text x="740" y="594" fill="#334155" font-size="12">2-phase incremental rotary encoders, 5V supply (Sheets 2, 3)</text>
+  <line x1="65" y1="608" x2="1535" y2="608" stroke="#cbd5e1" stroke-width="1"/>
+
+  <!-- Row 11: R3-R10 -->
+  <text x="85" y="638" fill="#0f172a" font-size="12" font-weight="bold">R3 - R10</text>
+  <text x="240" y="638" fill="#0f172a" font-size="12">Encoder Level-Shift Resistors</text>
+  <text x="672" y="638" fill="#0f172a" font-size="12">8</text>
+  <text x="740" y="638" fill="#334155" font-size="12">4x 2.2kOhm + 4x 3.3kOhm (5V to 3.3V divider for ENC1, ENC2)</text>
+  <line x1="65" y1="652" x2="1535" y2="652" stroke="#cbd5e1" stroke-width="1"/>
+
+  <!-- Row 12: R11, R12 -->
+  <text x="85" y="682" fill="#0f172a" font-size="12" font-weight="bold">R11, R12</text>
+  <text x="240" y="682" fill="#0f172a" font-size="12">Bus Voltage Sense Resistors</text>
+  <text x="672" y="682" fill="#0f172a" font-size="12">2</text>
+  <text x="740" y="682" fill="#334155" font-size="12">100kOhm &amp; 10kOhm (24V to 3.3V divider for brake chopper ADC)</text>
+  <line x1="65" y1="696" x2="1535" y2="696" stroke="#cbd5e1" stroke-width="1"/>
+
+  <!-- Row 13: U301, M2, GBX2 -->
+  <text x="85" y="726" fill="#0f172a" font-size="12" font-weight="bold">U301, M2</text>
+  <text x="240" y="726" fill="#0f172a" font-size="12">1.2 N.m Stepper &amp; Driver</text>
+  <text x="672" y="726" fill="#0f172a" font-size="12">1</text>
+  <text x="740" y="726" fill="#334155" font-size="12">1.2 N.m holding torque stepper + driver + 1:6 gear GBX2 (Sheet 3)</text>
+  <line x1="65" y1="740" x2="1535" y2="740" stroke="#cbd5e1" stroke-width="1"/>
+
+  <!-- Row 14: GR1, GP1 -->
+  <text x="85" y="770" fill="#0f172a" font-size="12" font-weight="bold">GR1, GP1</text>
+  <text x="240" y="770" fill="#0f172a" font-size="12">1:5 Mild Steel Gear Set</text>
+  <text x="672" y="770" fill="#0f172a" font-size="12">1</text>
+  <text x="740" y="770" fill="#334155" font-size="12">4mm mild steel inner rim gear (on pedal acrylic) &amp; pinion (1:5)</text>
+  <line x1="65" y1="784" x2="1535" y2="784" stroke="#cbd5e1" stroke-width="1"/>
+
+  <!-- Row 15: FLY1 -->
+  <text x="85" y="814" fill="#0f172a" font-size="12" font-weight="bold">FLY1</text>
+  <text x="240" y="814" fill="#0f172a" font-size="12">Aluminum Flywheel Disk</text>
+  <text x="672" y="814" fill="#0f172a" font-size="12">1</text>
+  <text x="740" y="814" fill="#334155" font-size="12">290mm diameter, 8mm thick solid aluminum disk (Sheet 3)</text>
+  <line x1="65" y1="828" x2="1535" y2="828" stroke="#cbd5e1" stroke-width="1"/>
+
+  <!-- Row 16: STAT1, STAT2 -->
+  <text x="85" y="858" fill="#0f172a" font-size="12" font-weight="bold">STAT1, STAT2</text>
+  <text x="240" y="858" fill="#0f172a" font-size="12">Symmetrical N52 Magnet Disks</text>
+  <text x="672" y="858" fill="#0f172a" font-size="12">2</text>
+  <text x="740" y="858" fill="#334155" font-size="12">5mm acrylic sheets, 2mm air gap, 8x (30x10x5mm) N52 magnets/side</text>
+</svg>
