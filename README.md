@@ -1,41 +1,90 @@
-# Single-Arm Motorized Knee Rehabilitation System — Top Hub Motor Control, Offset-Pivot Kinematics, Automated Calibration & Clinical Biomechanics Specification
+# Doula (`VK26-IITI-HT-0240`) — Integrated Dual-Tier Knee Rehabilitation System: Master Repository Index & Top-Hub Motorized Control Specification
 
-## 1. System Overview
+> [!IMPORTANT]
+> **Project Doula — Vishwakarma Awards 2026–27 (Health Tech Track: `VK26-IITI-HT-0240`) & IIT Mandi `IC-202P` Design Practicum**
+> * **Core Innovation:** A single compact, floor-anchored dual-tier rehabilitation system combining **Motorized Knee Flexion/Extension Strengthening & CPM (`U2: ESP_TOPHUB`)** and **Symmetrical Axial-Flux Eddy-Current Cycling (`U3: ESP_CYCLING`)** with latch-free mode switching via seated repositioning, coordinated by an **Evidence-Based Clinical Web Application (`U1: ESP_MASTER`)** over a deterministic **ESP-NOW** wireless network.
+> * **Team (IIT Mandi):** Gauravi Tiwari, Vedansh Tyagi, Aman Modi, Kanishk Goel, Mayank Vediya
+> * **Mentors:** Dr. Gajendra Singh (IIT Mandi), Miss Dia Bhandari (NID Assam)
 
-This document details the complete electro-mechanical architecture, non-collinear offset-pivot biomechanics, closed-loop current/force control theory, automated setup & parameter identification routine, multi-sensor spasm/hard-stop protection system, and clinical rehabilitation targets for the **Single-Arm Motorized Knee Rehabilitation System (`ESP_TOPHUB`)**.
+---
 
-The system is engineered to administer medical-standard **Early-Stage** and **Intermediate-Stage** knee flexion/extension rehabilitation protocols (post-ACL reconstruction, Total Knee Arthroplasty, meniscal repair, and general orthopedic recovery) on one limb at a time, coordinated by the **Master ESP32 (`ESP_MASTER`) Clinical Web GUI** over a deterministic **ESP-NOW** wireless link.
+## 0. Consolidated Repository Architecture & Cross-Reference Index
+
+All specifications, electrical schematics, bill of materials, wiring guides, and 3D SolidWorks CAD assemblies across this repository are strictly correlated by component designators (`PSU1`, `U1–U5`, `U201–U203`, `U301`, `M1–M2`, `GBX1–GBX2`, `STOP1`, `ENC1–ENC2`, `R1–R16`, `GR1`, `GP1`, `FLY1`, `STAT1–STAT2`), net labels, and physical constants:
+
+| Repository Document / Asset | Subsystem Scope | Key Contents & Cross-Referenced Designators |
+| :--- | :--- | :--- |
+| **[`README.md`](README.md)** *(This Document)* | **Master Index + Top-Hub Knee Module (`U2: ESP_TOPHUB`)** | Master repository index; `M1` (`MY1016` $24\,\text{V}$ $250\,\text{W}$) + `GBX1` ($1:52$, $\eta=85\%$, $60/100\,\text{N}\cdot\text{m}$); `U201` (`Rhino MD20Amp`); inline `U203` (`ACS712-30A`, $33.0\,\text{mV/A}$ at `IO35`); `U202` + `R1\|\|R2` ($1.0\,\Omega, 200\,\text{W}$ series brake chopper); non-collinear offset-pivot kinematics ($d_{\text{offset}}=8\text{–}10\,\text{cm}, L_{\text{leg}}=30\,\text{cm}$); 6-Stage Auto-Calibration; Spasm & $<3\,\text{ms}$ Hard-Stop control |
+| **[`README_CYCLING_EDDY_BRAKE.md`](README_CYCLING_EDDY_BRAKE.md)** | **Bottom-Tier Cycling & Eddy Brake (`U3: ESP_CYCLING`)** | `GR1`/`GP1` ($1:5$ mild-steel internal ring-to-pinion step-up); `FLY1` ($\varnothing 290\times 8\,\text{mm}$ Al 6061-T6 flywheel, $J_{\text{fly,eff}} = 0.01630\,\text{kg}\cdot\text{m}^2$); `STAT1`/`STAT2` ($2\times 8$ N52 magnets, $0^\circ\text{–}45^\circ$ stroke); `M2` ($1.2\,\text{N}\cdot\text{m}$ stepper) + `GBX2` ($1:6$) + `U301` (`TB6600/DM542`); `ENC2` ($360\,\text{PPR}$ NPN); Derivative-Free Momentum Disturbance Observer ($\hat{\tau}_{\text{pedal}}$) & anti-stall unloading |
+| **[`README_INTEGRATED_SYSTEM_AND_WEB_APP.md`](README_INTEGRATED_SYSTEM_AND_WEB_APP.md)** | **3-ESP32 Network, Clinical Web GUI & Prescription Engine (`U1: ESP_MASTER`)** | Unified 3-ESP32 (`U1`, `U2`, `U3`) Wi-Fi AP + ESP-NOW Channel 1 architecture; packed C telemetry/command protocol (`rehab_espnow_protocol.h` @ $50\,\text{Hz}$); AAOS/MOON criterion-based clinical decision tree (ROM $\ge 100^\circ$ cycling gate, ACL $40^\circ\rightarrow 0^\circ$ shear taper); 6 clinical performance metrics ($\text{PT/BW}$, $H/Q$, $\text{FI}\%$, $\text{LSI}_{\text{cycle}}$) |
+| **[`WIRING_AND_COMMISSIONING_GUIDE.md`](WIRING_AND_COMMISSIONING_GUIDE.md)** | **Hardware Wiring, Resistor Allocation & Bring-Up Protocol** | Pin-by-pin wiring for `U1`, `U2`, `U3` (`ESP32-S NodeMCU V1.1`); `U4` CC/CV Buck tuning ($5.05\,\text{V}, 1.90\,\text{A}$); `U5` $3.30\,\text{V}$ LDO; verified resistor inventory allocation (`4x 220kΩ`, `3x 22kΩ`, `1x 4.6kΩ`, `4x 80Ω`); mild-steel chassis `PE` bonding vs. isolated `STAR_GND`; 4-Stage pre-power multimeter checklist |
+| **[`System_Schematics_3Page.pdf`](System_Schematics_3Page.pdf)**<br>• [`Sheet 1 SVG`](schematic_page1_master_power_network.svg)<br>• [`Sheet 2 SVG`](schematic_page2_top_hub_control.svg)<br>• [`Sheet 3 SVG`](schematic_page3_bottom_cycling_ecb.svg)<br>• [`Sheet 4 BOM SVG`](schematic_page4_bom.svg) | **Complete 4-Sheet Electrical & Mechanical Schematic Package** | **Sheet 1:** `PSU1` ($24\,\text{V}\;30\,\text{A}$), Steel Chassis Earth, `U4` Buck ($5.05\,\text{V}$), `U5` LDO ($3.30\,\text{V}$), Master `U1`<br>**Sheet 2:** Top Hub `U2`, `U201` Rhino MD20A, inline `U203` `ACS712-30A` (`R13/R14`), `M1` + `GBX1` + `STOP1`, `ENC1` (`R3/R5`), Series Chopper `R1\|\|R2` + `U202` (`R11/R12/R15/R16`)<br>**Sheet 3:** Cycling `U3`, `U301` (`TB6600`), `M2` + `GBX2`, `ENC2` (`R7/R9`), `GR1/GP1/FLY1/STAT1/STAT2`<br>**Sheet 4:** Master Bill of Materials & Verified Resistor Inventory Table |
+| **[`Doula_DP_parts_only/`](Doula_DP_parts_only/Doula_DP_parts_only/)** | **3D CAD Models (`.STEP`, `.SLDPRT`, `.DXF`) & SKF Bearings** | Full assembly (`Whole_cycling _assembly_part-1.STEP`), telescopic elbow-jointed orthosis arm links (`arm_link-1_new.STEP`, `arm_link-2.STEP`), flywheel & pinion (`NEW_flywheel_and_gear.STEP`, `spur gear_iso.DXF`), internal ring-gear pedal wheel (`NEW_gear_pedal_wheel.STEP`, `pedal_attachment.STEP`), ECB stators (`NEW_static_magneticplate&stand.STEP`, `rotating_magnetic_plate.STEP`), and SKF bearings (`6205-Z`, `6004-2RSL`, `619/6-2Z`) |
+| **[`Submission_PPT.pdf`](Submission_PPT.pdf)** | **Vishwakarma Awards 2026–27 Stage 1/2 Presentation Deck** | Problem statement, user journey, benchmarking (15 devices/patents), SolidWorks CAD renders, workshop fabrication photos, and Stage 1/2 concept overview (see Section 0.2 for Concept-to-Production Hardware Evolution) |
+
+### 0.1 System-Wide Node & Subsystem Correlation Matrix
+
+| Node ID & Role | MCU Board | Actuators & Drivers Controlled | Sensors & Feedback Channels | Real-Time Loop Rates | CAD & Schematic Correlation |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`U1: ESP_MASTER`**<br>*(Clinical Web Server & Coordinator)* | `ESP32-S NodeMCU V1.1` (`+3V3_LDO`) | Coordinates `U2` & `U3` via ESP-NOW (Channel 1); optional physical E-Stop on `GPIO4` | Aggregates $50\,\text{Hz}$ telemetry & per-rep summaries from `U2` & `U3`; browser WebSocket UI (`20 Hz`) | `20 Hz` WebSocket UI<br>`10 Hz` Heartbeat TX<br>`< 3 ms` Hard-Stop Burst | [`Sheet 1`](schematic_page1_master_power_network.svg)<br>[`README_INTEGRATED_SYSTEM_AND_WEB_APP.md`](README_INTEGRATED_SYSTEM_AND_WEB_APP.md) |
+| **`U2: ESP_TOPHUB`**<br>*(Top-Hub Knee Flexion / Extension)* | `ESP32-S NodeMCU V1.1` (`+3V3_LDO`) | • `U201` (`Rhino MD20Amp`): `GPIO25` (`MD_PWM`, $20\,\text{kHz}$, `R15=220k` pull-down), `GPIO26` (`MD_DIR`) $\rightarrow$ `M1` (`MY1016`) + `GBX1` ($1:52$)<br>• `U202` (`30A MOSFET`): `GPIO27` (`CHOP_PWM`, $5\,\text{kHz}$, `R16=22k` pull-down) $\rightarrow$ `R1\|\|R2` ($1.0\,\Omega, 200\,\text{W}$) | • `ENC1` ($360\,\text{PPR}$ NPN on `M1` shaft, $74,880\,\text{CPR}$): `GPIO32/33` (`R3/R5=80Ω` + `INPUT_PULLUP`)<br>• `U203` (`ACS712-30A` inline with `M+`): `GPIO35` (`ADC1_CH7`, `R13/R14=22k/22k`, $1.25\,\text{V}@0\,\text{A}, 33\,\text{mV/A}$)<br>• `VBUS_SENSE`: `GPIO34` (`ADC1_CH6`, `R11=3x220k\|\|=73.33k` / `R12=4.6k`, $1.417\,\text{V}@24\,\text{V}$)<br>• *Optional:* $50\,\text{kg}$ Shin-Pad Load Cell (`GPIO36` / `GPIO21–22`) | `5 kHz` Brake Chopper ISR<br>`2 kHz` Current PI Loop<br>`1 kHz` Kinematic & Spasm Supervisor<br>`50 Hz` ESP-NOW TX | [`Sheet 2`](schematic_page2_top_hub_control.svg)<br>`arm_link-1_new.STEP`<br>`arm_link-2.STEP`<br>[`README.md`](README.md) |
+| **`U3: ESP_CYCLING`**<br>*(Bottom-Tier Cycling & Eddy Brake)* | `ESP32-S NodeMCU V1.1` (`+3V3_LDO`) | • `U301` (`TB6600/DM542`): `GPIO18` (`STEP_PUL`), `GPIO19` (`STEP_DIR`) $\rightarrow$ `M2` ($1.2\,\text{N}\cdot\text{m}$ Stepper) + `GBX2` ($1:6$ gear) rotating `STAT2` ($\alpha \in [0^\circ, 45^\circ]$) | • `ENC2` ($360\,\text{PPR}$ NPN on `FLY1` shaft, $1440\,\text{CPR}$ = $7200\,\text{cnt/pedal rev}$): `GPIO32/33` (`R7/R9=80Ω` + `INPUT_PULLUP`)<br>• Sensorless Luenberger Momentum Disturbance Observer ($\hat{\tau}_{\text{pedal}}, \hat{F}_{\text{pedal}}, P_{\text{user}}$) | `100 Hz` Momentum Observer & Stepper Control Loop<br>`50 Hz` ESP-NOW TX | [`Sheet 3`](schematic_page3_bottom_cycling_ecb.svg)<br>`NEW_flywheel_and_gear.STEP`<br>`NEW_gear_pedal_wheel.STEP`<br>`rotating_magnetic_plate.STEP`<br>[`README_CYCLING_EDDY_BRAKE.md`](README_CYCLING_EDDY_BRAKE.md) |
+
+### 0.2 Concept-to-Production Design Evolution (Correlating `Submission_PPT.pdf` with Production Specs)
+
+The Stage 1/2 presentation deck ([`Submission_PPT.pdf`](Submission_PPT.pdf)) documents the initial conceptual architecture and early preliminary schematic screenshots. During detailed engineering for Stage 2/3 production bring-up, the following refinements were implemented across the schematics and firmware specifications:
+
+| Subsystem Feature | Stage 1/2 Initial Concept (`Submission_PPT.pdf`) | Consolidated Production Specification (`Schematics Sheets 1–4` & `READMEs`) | Engineering Rationale |
+| :--- | :--- | :--- | :--- |
+| **Control Topology** | Single ESP32 + local UART/I2C display | **3-Node ESP-NOW Distributed Network (`U1`, `U2`, `U3`)** + Async Wi-Fi Clinical Web GUI (`http://192.168.4.1`) | Isolates hard real-time $1\text{–}5\,\text{kHz}$ motor/chopper control (`U2`) and $100\,\text{Hz}$ cycling observer (`U3`) from Wi-Fi/HTTP stack latency (`U1`) |
+| **Top-Hub Torque & Spasm Sensing** | Open-loop motor voltage model; planned load-cell force sensor | **Inline `U203` (`ACS712-30A`) $2\,\text{kHz}$ Closed-Loop PI Current Control** + $74,880\,\text{CPR}$ `ENC1` (with optional $50\,\text{kg}$ shin-pad load cell expansion port) | Measures true 4-quadrant armature current $I_m(t)$ (including Mode 2 zero-PWM shorting) and detects spasm torque spikes without requiring extra mechanical load-cell wiring |
+| **Overvoltage & Power-Cut Protection** | Conceptual supercapacitor bank for power-cut arm return | **High-Side Parallel Braking Resistor Bank (`R1\|\|R2` = $1.0\,\Omega, 200\,\text{W}$) in series with 2-Screw `U202` (`30A MOSFET`)** + `HARD_STOP_LOCKED` / back-drivable $85\%$ gearbox | Clamps regenerative bus voltage surges ($<26.5\,\text{V}$) during active/isokinetic braking; the high-efficiency ($\eta=85\%$) $1:52$ gearbox allows safe passive gravity lowering on power loss |
+| **Signal Conditioning Resistor Network** | Preliminary generic dividers ($100\,\text{k}\Omega/10\,\text{k}\Omega$ bus, $2.2\,\text{k}\Omega/3.3\,\text{k}\Omega$ encoder) | **Verified Inventory Allocation:** `R11` ($3\times 220\,\text{k}\Omega\parallel = 73.33\,\text{k}\Omega$) / `R12` ($4.6\,\text{k}\Omega$) for `VBUS_SENSE`; `R13/R14` ($22\,\text{k}\Omega/22\,\text{k}\Omega$) for `ACS712`; `R3,R5,R7,R9` ($4\times 80\,\Omega$ series damping + `INPUT_PULLUP`) for NPN open-collector encoders; `R15` ($220\,\text{k}\Omega$) & `R16` ($22\,\text{k}\Omega$) PWM pull-downs | Prevents NPN open-collector logic-LOW voltage elevation ($1.43\,\text{V} > V_{IL,\max}$) and guarantees $0\%$ PWM on `U201`/`U202` during ESP32 reset |
+
+---
+
+## 1. Top-Hub Subsystem Overview (`U2: ESP_TOPHUB`)
+
+This document details the complete electro-mechanical architecture, non-collinear offset-pivot biomechanics, closed-loop current/force control theory, automated setup & parameter identification routine, multi-sensor spasm/hard-stop protection system, and clinical rehabilitation targets for the **Single-Arm Motorized Knee Rehabilitation Subsystem (`U2: ESP_TOPHUB`)**.
+
+The subsystem is engineered to administer medical-standard **Early-Stage** and **Intermediate-Stage** knee flexion/extension rehabilitation protocols (post-ACL reconstruction, Total Knee Arthroplasty, meniscal repair, and general orthopedic recovery) on one limb at a time, coordinated by the **Master ESP32 (`U1: ESP_MASTER`) Clinical Web GUI** over a deterministic **ESP-NOW** wireless link.
 
 ### Key Architectural Highlights
-1. **Closed-Loop Armature Current Sensing (`ACS712-30A`):** An inline $\pm 30\,\text{A}$ Hall-effect current sensor module (`ACS712ELCTR-30A-T`) measures bidirectional motor armature current $I_m(t)$ across all four operating quadrants (motoring, low-side dynamic shorting, active plugging, and regenerative braking), eliminating open-loop thermal drift.
-2. **High-Efficiency $1:52$ Gearbox ($85\%$ Efficiency, $60\,\text{N}\cdot\text{m}$ Rated / $100\,\text{N}\cdot\text{m}$ Peak):** Incorporates exact datasheet transmission bounds—efficiency $\eta = 85\%$, continuous rated torque $60\,\text{N}\cdot\text{m}$, peak torque $100\,\text{N}\cdot\text{m}$, backlash $\le 50\,\text{arcmin}$ ($\le 0.833^\circ$), and rated input speed $\le 3000\,\text{RPM}$.
-3. **Non-Collinear Offset-Pivot Biomechanics ($d_{\text{offset}} = 8\text{–}10\,\text{cm}$) & Pad Force Modeling ($L_{\text{leg}}$):** Explicitly accounts for the mechanical vertical offset between the orthosis arm pivot and the anatomical knee joint center (`PIVOT_OFFSET_Y_M`, default $9.0\,\text{cm}$, configurable) as well as the patient's tibial contact lever arm (`LEG_PAD_DIST_M`, default $30.0\,\text{cm}$), mapping linear patient leg force $F_{\text{pad}}$ ($\text{N}$ / $\text{kgf}$) to both anatomical knee torque ($\tau_{\text{knee}}$) and gearbox shaft torque ($\tau_{\text{gbx}}$).
-4. **Multi-Modal Spasm Control & Emergency Hard-Stop Feature:** Integrates a compact **Low-Profile Strain Gauge / Mini Load Cell ($50\,\text{kg} / 500\,\text{N}$)** directly behind the shin padding alongside the **ACS712-30A** current sensor and **360 PPR Optical Encoder**. Provides instantaneous spasm relief (halt + tension-relieving backoff) and a dual-mode **Hard Stop** triggered either by medically relevant sensed anomalies (spasm, clonus, pain yield) or immediately via user/clinician input on the **Master ESP Web GUI**.
-5. **Automated 6-Stage Setup & Parameter Identification Routine:** Prior to therapy, an automated setup sequence homes the encoder, empirically identifies all non-datasheet/assumed physical constants ($\hat{V}_{\text{ACS,0}}, \hat{R}_{\text{loop}}, V_{\text{brush}}, \hat{K}_e, \hat{K}_t, \hat{I}_0, \hat{\tau}_{\text{stiction}}, \hat{B}_{\text{visc}}, \hat{\theta}_{\text{backlash}}, \hat{\eta}_{\text{fwd}}, \hat{\eta}_{\text{back}}, \hat{\tau}_{\text{grav}}$), and computes real-time **Smooth-Working Correction Factors** for zero-jerk operation.
+1. **Closed-Loop Armature Current Sensing (`U203: ACS712-30A`):** An inline $\pm 30\,\text{A}$ Hall-effect current sensor module (`ACS712ELCTR-30A-T`, level-shifted via `R13 = 22 kΩ` / `R14 = 22 kΩ` to `U2 GPIO35`) measures bidirectional motor armature current $I_m(t)$ across all four operating quadrants (motoring, low-side dynamic shorting, active plugging, and regenerative braking), eliminating open-loop thermal drift.
+2. **High-Efficiency $1:52$ Gearbox (`GBX1`: $85\%$ Efficiency, $60\,\text{N}\cdot\text{m}$ Rated / $100\,\text{N}\cdot\text{m}$ Peak):** Incorporates exact datasheet transmission bounds—efficiency $\eta = 85\%$, continuous rated torque $60\,\text{N}\cdot\text{m}$, peak torque $100\,\text{N}\cdot\text{m}$, backlash $\le 50\,\text{arcmin}$ ($\le 0.833^\circ$), and rated input speed $\le 3000\,\text{RPM}$.
+3. **Non-Collinear Offset-Pivot Biomechanics ($d_{\text{offset}} = 8\text{–}10\,\text{cm}$) & Pad Force Modeling ($L_{\text{leg}}$):** Explicitly accounts for the mechanical vertical offset between the orthosis arm pivot (`arm_link-1_new.STEP` / `arm_link-2.STEP`) and the anatomical knee joint center (`PIVOT_OFFSET_Y_M`, default $9.0\,\text{cm}$, configurable) as well as the patient's tibial contact lever arm (`LEG_PAD_DIST_M`, default $30.0\,\text{cm}$), mapping linear patient leg force $F_{\text{pad}}$ ($\text{N}$ / $\text{kgf}$) to both anatomical knee torque ($\tau_{\text{knee}}$) and gearbox shaft torque ($\tau_{\text{gbx}}$).
+4. **Multi-Modal Spasm Control & Emergency Hard-Stop Feature:** Combines high-rate **ACS712-30A** current residual/derivative sensing and **360 PPR Motor-Shaft Optical Encoder (`ENC1`, $74,880\,\text{CPR}$)** velocity/clonus tracking as the primary hardware protection layer, with native expansion support for an optional **Low-Profile Strain Gauge / Mini Load Cell ($50\,\text{kg} / 490\,\text{N}$)** behind the shin padding. Provides instantaneous spasm relief (halt + tension-relieving backoff) and a dual-mode **Hard Stop** triggered either by medically relevant sensed anomalies (spasm, clonus, pain yield) or immediately ($<3\,\text{ms}$) via user/clinician input on the **Master ESP Web GUI**.
+5. **Automated 6-Stage Setup & Parameter Identification Routine:** Prior to therapy, an automated setup sequence homes the encoder against `STOP1`, empirically identifies all non-datasheet/assumed physical constants ($\hat{V}_{\text{ADC,0}}, \hat{R}_{\text{loop}}, \hat{V}_{\text{brush}}, \hat{K}_e, \hat{K}_t, \hat{I}_0, \hat{\tau}_{\text{stiction}}, \hat{B}_{\text{visc}}, \hat{\theta}_{\text{backlash}}, \hat{\eta}_{\text{fwd}}, \hat{\eta}_{\text{back}}, \hat{\tau}_{\text{grav}}$), and computes real-time **Smooth-Working Correction Factors** for zero-jerk operation.
 
 ---
 
-## 2. Hardware Architecture & Bill of Materials
+## 2. Hardware Architecture, CAD Correlation & Bill of Materials
 
-### 2.1 Core Component Specifications
+### 2.1 Core Component Specifications (Correlated with [`Sheet 1`](schematic_page1_master_power_network.svg), [`Sheet 2`](schematic_page2_top_hub_control.svg) & [`Sheet 4 BOM`](schematic_page4_bom.svg))
 
-| Subsystem | Component | Key Ratings & Specifications | Functional Role |
-| :--- | :--- | :--- | :--- |
-| **Main Actuator** | **MY1016 Brushed DC Motor** | $24\,\text{V}$ DC, $250\,\text{W}$ rated, $2750\,\text{RPM}$ rated ($\sim 3300\,\text{RPM}$ no-load), $I_{\text{rated}} \approx 13.5\,\text{A}$, $\tau_{m,\text{rated}} \approx 0.87\,\text{N}\cdot\text{m}$, $R_a \approx 0.33\,\Omega$ | Primary electro-mechanical torque source (driving & back-driven braking) |
-| **Transmission** | **1:52 Reduction Gearbox** | Ratio $G = 52:1$, Efficiency $\eta = \mathbf{85\%}$, Rated Torque $= \mathbf{60\,\text{N}\cdot\text{m}}$, Max Torque $= \mathbf{100\,\text{N}\cdot\text{m}}$, Backlash $\le \mathbf{50\,\text{arcmin}}$ ($0.833^\circ$), Rated Input Speed $\le \mathbf{3000\,\text{RPM}}$ | Amplifies motor torque by $52\times$ and scales speed to physiological knee velocities |
-| **Motor Driver** | **Rhino MD20Amp DC Motor Driver** | $6\,\text{V}\text{–}30\,\text{V}$ DC, 1-Channel Full NMOS H-Bridge, $20\,\text{A}$ Continuous / $60\,\text{A}$ Peak ($10\,\text{s}$), PWM up to $20\,\text{kHz}$, `PWM` + `DIR` logic ($1.8\,\text{V}\text{–}12\,\text{V}$) | Bidirectional motor drive, hardware overcurrent clamp ($20\,\text{A}$), and low-side dynamic shorting |
-| **Armature Current Sensor** | **ACS712 30A Current Sensor Module** | $\pm 30\,\text{A}$ bidirectional Hall-effect (`ACS712ELCTR-30A`), $5.0\,\text{V}$ supply, $V_{\text{zero}} = 2.50\,\text{V}$, Sensitivity $S = \mathbf{66\,\text{mV/A}}$, $80\,\text{kHz}$ bandwidth | Inline with motor terminal `M+`; measures true armature current $I_m$ in all 4 quadrants for closed-loop PI torque control, setup identification, and spasm detection |
-| **Pad Force / Spasm Sensor** | **Compact Strain Gauge / Mini Load Cell + Amplifier** | $50\,\text{kg}$ ($490\,\text{N}$) low-profile bending-beam/button load cell integrated into shin padding mount + `INA125` ($1\,\text{kHz}$ analog) or `HX711` ($80\,\text{Hz}$ high-rate mode) | Directly measures normal force $F_{\text{pad}}(t)$ applied by the user's leg at the padding for spasm detection, gravity tare, and gearbox efficiency calibration |
-| **Main Power Supply** | **24V 30A SMPS** | $24\,\text{V}$ DC, $30\,\text{A}$ max ($720\,\text{W}$) | Supplies primary DC power bus ($V_{\text{bus}}$) |
-| **Brake Chopper Switch** | **3D Printer 30A Heatbed MOSFET Module** | High-current NMOS module ($30\,\text{A}$ continuous), opto-isolated/buffered PWM control input | Switches regenerative braking energy from the $24\,\text{V}$ bus into the braking resistor bank |
-| **Braking Resistors** | **2$\times$ $2\,\Omega$, $100\,\text{W}$ Aluminum-Shell Resistors** | Wired **in parallel** $\implies R_{\text{eq}} = 1.0\,\Omega$, $P_{\text{rated}} = 200\,\text{W}$ continuous ($625\,\text{W}$ peak at $25\,\text{V}$) | Dissipates regenerative energy as heat when back-driven by the patient, clamping $V_{\text{bus}} < 26.5\,\text{V}$ |
-| **Position Sensor** | **2-Phase Incremental Optical Rotary Encoder** | $360\,\text{PPR}$ (Pulses Per Revolution), Quadrature A/B channels ($1440\,\text{CPR}$ at $4\times$ decoding), $5\,\text{V}$ supply | Tracks shaft angle ($\theta_m$) and angular velocity ($\dot{\theta}_m$) for closed-loop control |
-| **Power Regulation** | **24V$\rightarrow$5V Buck + 5V$\rightarrow$3.3V LDO** | Stage 1: $24\,\text{V}$ to $5\,\text{V}$ DC-DC Buck Converter<br>Stage 2: $5\,\text{V}$ to $3.3\,\text{V}$ Linear LDO Regulator | Buck supplies $5\,\text{V}$ to Optical Encoder, ACS712-30A, & LDO input; LDO provides low-ripple $3.3\,\text{V}$ for ESP32 & load cell reference |
-| **Controllers** | **Local `ESP_TOPHUB` + Master `ESP_MASTER` (ESP32)** | Dual-core $240\,\text{MHz}$, hardware `MCPWM`, hardware `PCNT` quadrature decoder, $12\text{-bit}$ SAR ADC, ESP-NOW RF link | `ESP_TOPHUB` runs $2\,\text{kHz}$ current loop, $1\,\text{kHz}$ kinematic/spasm loop, and $5\,\text{kHz}$ chopper loop; `ESP_MASTER` hosts Clinical Web GUI & remote Hard-Stop trigger |
+| Schematic ID | Subsystem / Component | Key Ratings & Verified Wiring Specifications | Functional Role |
+| :---: | :--- | :--- | :--- |
+| **`M1`** | **MY1016 Brushed DC Motor** | $24\,\text{V}$ DC, $250\,\text{W}$ rated, $2750\,\text{RPM}$ rated ($\sim 3300\,\text{RPM}$ no-load), $I_{\text{rated}} \approx 13.5\,\text{A}$, $\tau_{m,\text{rated}} \approx 0.87\,\text{N}\cdot\text{m}$, $R_a \approx 0.33\,\Omega$; case isolated from `M+/M-` | Primary electro-mechanical torque source (driving & back-driven braking) |
+| **`GBX1` + `STOP1`** | **1:52 Reduction Gearbox & Mechanical Hard Stop** | Ratio $G = 52:1$, Efficiency $\eta = \mathbf{85\%}$, Rated Torque $= \mathbf{60\,\text{N}\cdot\text{m}}$, Max Torque $= \mathbf{100\,\text{N}\cdot\text{m}}$, Backlash $\le \mathbf{50\,\text{arcmin}}$ ($0.833^\circ$), Rated Input Speed $\le \mathbf{3000\,\text{RPM}}$ | Amplifies motor torque by $52\times$, scales speed to physiological knee velocities, and provides zero-datum homing stop (`STOP1`) |
+| **`U201` + `R15`** | **Rhino MD20Amp DC Motor Driver** | $6\,\text{V}\text{–}30\,\text{V}$ DC, $20\,\text{A}$ Continuous / $60\,\text{A}$ Peak ($10\,\text{s}$), $20\,\text{kHz}$ `MD_PWM` on `U2 GPIO25` (with `R15 = 220 kΩ` pull-down to `GND`), `MD_DIR` on `U2 GPIO26` | Bidirectional 4-quadrant motor drive, hardware overcurrent clamp ($20\,\text{A}$), and low-side dynamic shorting |
+| **`U203` + `R13, R14`** | **ACS712-30A Current Sensor Module** | $\pm 30\,\text{A}$ bidirectional Hall-effect (`ACS712ELCTR-30A`), $+5.05\,\text{V}$ supply (`+5V_BUCK`), $66\,\text{mV/A}$ raw; shifted via `R13 = 22 kΩ` / `R14 = 22 kΩ` ($1:1$) to `U2 GPIO35` ($\mathbf{1.250\,\text{V}}$ @ $0\,\text{A}$, $\mathbf{33.0\,\text{mV/A}}$) | Wired inline between `U201 M+` (`IP+`) and `M1 (+)` (`IP-`); measures true armature current $I_m$ in all 4 quadrants for $2\,\text{kHz}$ PI control, setup ID, and spasm detection |
+| **`ENC1` + `R3, R5`** | **360 PPR NPN Open-Collector Optical Encoder** | Mounted on **high-speed motor shaft (`M1`)** $\implies 1440 \times 52 = \mathbf{74,880\,\text{counts/output rev}}$ ($\mathbf{0.00481^\circ/\text{count}}$); `+5V_BUCK` supply; `OUT_A/B` via `R3, R5 = 80 Ω` series damping to `U2 GPIO32/33` (`INPUT_PULLUP`, **no `GND` resistor**) | Tracks shaft angle ($\theta_m$) and angular velocity ($\dot{\theta}_m$) for closed-loop control, backlash measurement, and clonus detection |
+| **`PSU1`** | **24V 30A SMPS Power Supply** | $24.00\,\text{V}$ DC, $30\,\text{A}$ max ($720\,\text{W}$); `PE/FG` bonded to Mild-Steel Chassis Earth Stud; `-V` wired to isolated `STAR_GND` busbar | Supplies primary DC power bus (`+24V_BUS`) |
+| **`U202` + `R16`** | **30A Heatbed MOSFET Brake Chopper (2-Screw Variant)** | Low-side NMOS power switch: `Power +` [Drain] from `R1\|\|R2` Lead B, `Power -` [Source] to `STAR_GND`; driven by $5\,\text{kHz}$ `CHOP_PWM` on `U2 GPIO27` (with `R16 = 22 kΩ` pull-down to `GND`) | Switches regenerative braking energy from `+24V_BUS` through the series braking resistor bank to `STAR_GND` |
+| **`R1, R2` + `R11, R12`** | **2$\times$ $2.0\,\Omega, 100\,\text{W}$ Resistors & Bus Divider** | `R1 \|\| R2` wired **in parallel** ($R_{\text{eq}} = 1.0\,\Omega, 200\,\text{W}$) and placed **in series** between `+24V_BUS` (Lead A) and `U202 Power +` (Lead B); `R11` ($3\times 220\,\text{k}\Omega\parallel = 73.33\,\text{k}\Omega$) + `R12` ($4.6\,\text{k}\Omega$) $\rightarrow$ `U2 GPIO34` ($\mathbf{1.417\,\text{V}}$ @ $24.0\,\text{V}$) | Dissipates regenerative energy as heat when back-driven by the patient, clamping $V_{\text{bus}} < 26.5\,\text{V}$ |
+| **`U4` + `U5`** | **24V$\rightarrow$5.05V CC/CV Buck + 5V$\rightarrow$3.30V LDO** | `U4`: Tuned to $\text{CV} = 5.05\,\text{V}, \text{CC} = 1.90\,\text{A}$ (`+5V_BUCK` to `ENC1`, `ENC2`, `U203`, `U5 VIN`)<br>`U5`: Clean $+3.30\,\text{V}$ (`+3V3_LDO`) to `U1`, `U2`, `U3` (`3V3` pin) | Dual-stage isolated logic power regulation |
+| **`U2` + `U1`** | **Local `ESP_TOPHUB` (`U2`) + Master `ESP_MASTER` (`U1`)** | `ESP32-S NodeMCU V1.1` ($240\,\text{MHz}$ dual-core, `MCPWM`, `PCNT`, `ADC1`, ESP-NOW Channel 1) | `U2` runs $5\,\text{kHz}$ chopper, $2\,\text{kHz}$ current PI, and $1\,\text{kHz}$ kinematic/spasm loops; `U1` hosts Clinical Web GUI & $<3\,\text{ms}$ Hard-Stop trigger |
+| *Optional Expansion* | **Shin-Pad Strain Gauge / Mini Load Cell** | $50\,\text{kg}$ ($490\,\text{N}$) low-profile load cell behind shin cuff + `INA125` (`U2 GPIO36` `ADC1_CH0`) or `HX711` (`U2 GPIO21/22`) | Optional direct normal pad force $F_{\text{pad}}(t)$ measurement (fuses with primary `U203` `ACS712-30A` + `ENC1` torque/spasm observer when populated) |
+
+### 2.2 Mechanical CAD Correlation (`Doula_DP_parts_only`)
+The Top-Hub mechanical assembly is modeled in SolidWorks inside [`Doula_DP_parts_only/Doula_DP_parts_only/`](Doula_DP_parts_only/Doula_DP_parts_only/):
+* **[`arm_link-1_new.STEP`](Doula_DP_parts_only/Doula_DP_parts_only/arm_link-1_new.STEP) & [`arm_link-2.STEP`](Doula_DP_parts_only/Doula_DP_parts_only/arm_link-2.STEP):** Two-piece telescopic, elbow-jointed orthosis arm assembly with dual rows of adjustment holes. This geometry allows:
+  1. **Tuck-Away Clearance for Latch-Free Mode Switching:** During Bottom-Tier Cycling (`U3`), the elbow joint folds the orthosis arm upward and out of the pedal sweep envelope without requiring any mechanical clutch or solenoid latch.
+  2. **Configurable Tibial Lever Arm ($L_{\text{leg}} \in [20, 40]\,\text{cm}$, default $30.0\,\text{cm}$) & Elevated Pivot Offset ($d_{\text{offset}} = 8\text{–}10\,\text{cm}$, default $9.0\,\text{cm}$):** Matches patient anthropometry while maintaining wide lateral leg clearance above the lower cycling assembly ([`Whole_cycling _assembly_part-1.STEP`](Doula_DP_parts_only/Doula_DP_parts_only/Whole_cycling%20_assembly_part-1.STEP)).
 
 ---
 
-### 2.2 System Block & Power/Signal Flow Diagram
+### 2.3 System Block & Power/Signal Flow Diagram
 
 ```mermaid
 flowchart TD
@@ -56,28 +105,28 @@ flowchart TD
     end
 
     subgraph Regen_Protection ["Brake Chopper Circuit (Overvoltage Clamp)"]
-        VSENSE["Bus Voltage Divider (100kΩ / 10kΩ)"]
-        MOS["30A Heatbed MOSFET Module"]
+        VSENSE["Bus Voltage Divider (3x220kΩ || = 73.3kΩ / 4.6kΩ)"]
         RES["2x 2Ω 100W Resistors in Parallel (R_eq = 1.0Ω, 200W)"]
+        MOS["30A Heatbed MOSFET Switch (Power+ Drain, Power- Source to GND)"]
         BUS --> VSENSE
-        BUS -->|"Drain / V_bus+"| MOS
-        MOS -->|"Switched Dump"| RES
+        BUS -->|"Series High Side (Lead A)"| RES
+        RES -->|"Lead B to Power+ (Drain)"| MOS
     end
 
     subgraph Control_Stage ["Top-Hub Controller & Multi-Sensor Feedback (U2: ESP_TOPHUB)"]
-        ESP["ESP32 Top-Hub Controller (3.3V Logic)"]
-        ENC["360 PPR Optical Encoder (5V)"]
+        ESP["ESP32-S NodeMCU V1.1 (3.3V Logic)"]
+        ENC["360 PPR NPN Open-Collector Encoder (Mounted on Motor Shaft)"]
         ACS["ACS712 30A Hall Current Sensor (5V, 66 mV/A)"]
-        SG["Pad Strain Gauge / 50kg Mini Load Cell\n(Integrated in Shin Padding Mount)"]
+        SG["Optional Pad Strain Gauge / Load Cell\n(Future Expansion Port)"]
         ESPM <-->|"ESP-NOW Link (50 Hz Telemetry / <3ms Hard-Stop)"| ESP
-        LDO -->|"Clean 3.3V"| ESP
-        BUCK -->|"5V Supply"| ENC
-        BUCK -->|"5V Supply"| ACS
-        ENC -->|"Ch A & B (2.2kΩ/3.3kΩ Shifted to 3.3V)"| ESP
-        ACS -->|"V_out (2.2kΩ/3.3kΩ Shifted to ADC)"| ESP
-        SG -->|"Pad Force F_pad(t) (Spasm & Torque Sense)"| ESP
-        VSENSE -->|"ADC Pin (Bus Voltage Monitor)"| ESP
-        ESP -->|"PWM_CHOP (5 kHz Gate Control)"| MOS
+        LDO -->|"Clean 3.30V Supply"| ESP
+        BUCK -->|"5.05V Supply"| ENC
+        BUCK -->|"5.05V Supply"| ACS
+        ENC -->|"Ch A & B (80Ω Series + ESP32 INPUT_PULLUP)"| ESP
+        ACS -->|"V_out (22kΩ/22kΩ 1:1 Shifted to IO35)"| ESP
+        SG -.->|"Optional Pad Force F_pad(t)"| ESP
+        VSENSE -->|"IO34 ADC1 (1.42V @ 24V)"| ESP
+        ESP -->|"IO27 CHOP_PWM (+ 22kΩ Pull-Down)"| MOS
     end
 
     subgraph Drive_Stage ["Actuation, 85% Gearbox & Offset-Pivot Orthosis"]
@@ -122,14 +171,14 @@ From the MY1016 rated specifications ($V_{\text{rated}} = 24\,\text{V}$, $P_{\te
 * **Placement Requirement:** The `ACS712-30A` is wired **in series with the motor terminal (`M+`)** between the Rhino MD20Amp output and the MY1016 motor—*not* on the $24\,\text{V}$ supply rail. This placement is essential so the sensor measures circulating armature current $I_m$ during **Mode 2 (low-side H-bridge shorting)** when supply current is zero.
 * **Sensor Output Equation ($5.0\,\text{V}$ Supply):**
   $$V_{\text{ACS}}(I_m) = V_{\text{zero}} + S_{\text{ACS}} \cdot I_m = 2.50\,\text{V} + 0.066\,\frac{\text{V}}{\text{A}} \cdot I_m \quad \in [0.52\,\text{V},\; 4.48\,\text{V}] \text{ for } I_m \in [-30\,\text{A},\; +30\,\text{A}]$$
-* **3.3V ESP32 ADC Level Shifting ($R_{\text{top}} = 2.2\,\text{k}\Omega$, $R_{\text{bot}} = 3.3\,\text{k}\Omega$):**
-  To protect the $3.3\,\text{V}$ ESP32 ADC and place the zero-current midpoint inside the highly linear region of the ESP32 SAR ADC (`ADC_ATTEN_DB_11`, linear range $0.15\,\text{V}\text{–}2.80\,\text{V}$), a precision $1\%$ voltage divider scales the output by $\alpha_{\text{div}} = \frac{3.3}{2.2 + 3.3} = 0.60$:
-  $$V_{\text{ADC}}(I_m) = 0.60 \times V_{\text{ACS}}(I_m) = 1.500\,\text{V} + 0.0396\,\frac{\text{V}}{\text{A}} \cdot I_m$$
-  * **At $I_m = 0\,\text{A}$:** $V_{\text{ADC}} = 1.500\,\text{V}$ (exact center of ESP32 ADC linear range).
-  * **At $I_m = \pm 20\,\text{A}$ (Driver Limit):** $V_{\text{ADC}} \in [0.708\,\text{V},\; 2.292\,\text{V}]$.
-  * **At $I_m = \pm 30\,\text{A}$ (Full Scale):** $V_{\text{ADC}} \in [0.312\,\text{V},\; 2.688\,\text{V}]$.
+* **3.3V ESP32 ADC Level Shifting ($R_{\text{top}} = 22\,\text{k}\Omega$, $R_{\text{bot}} = 22\,\text{k}\Omega$):**
+  To protect the $3.3\,\text{V}$ ESP32 ADC and place the zero-current midpoint inside the highly linear region of the ESP32 SAR ADC (`ADC_ATTEN_DB_11`, linear range $0.15\,\text{V}\text{–}2.45\,\text{V}$), a $1:1$ voltage divider ($22\,\text{k}\Omega / 22\,\text{k}\Omega$, total load $44\,\text{k}\Omega \gg R_{L,\text{min}} = 4.7\,\text{k}\Omega$) scales the output by $\alpha_{\text{div}} = \frac{22}{22 + 22} = 0.50$:
+  $$V_{\text{ADC}}(I_m) = 0.50 \times V_{\text{ACS}}(I_m) = 1.250\,\text{V} + 0.0330\,\frac{\text{V}}{\text{A}} \cdot I_m$$
+  * **At $I_m = 0\,\text{A}$:** $V_{\text{ADC}} = 1.250\,\text{V}$ (exact center of ESP32 ADC linear range).
+  * **At $I_m = \pm 20\,\text{A}$ (Driver Limit):** $V_{\text{ADC}} \in [0.590\,\text{V},\; 1.910\,\text{V}]$.
+  * **At $I_m = \pm 30\,\text{A}$ (Full Scale):** $V_{\text{ADC}} \in [0.260\,\text{V},\; 2.240\,\text{V}]$.
 * **Reconstructed Current in Firmware (with Calibrated Offset $\hat{V}_{\text{ADC,0}}$ & Gain Factor $\kappa_{\text{ACS}}$):**
-  $$I_m(t) = \kappa_{\text{ACS}} \cdot \frac{V_{\text{ADC}}(t) - \hat{V}_{\text{ADC,0}}}{0.0396\,\text{V/A}} \qquad (\text{12-bit ADC resolution} \approx 20.4\,\text{mA/LSB}, \text{ or } \sim 5\,\text{mA} \text{ with } 16\times \text{ oversampling})$$
+  $$I_m(t) = \kappa_{\text{ACS}} \cdot \frac{V_{\text{ADC}}(t) - \hat{V}_{\text{ADC,0}}}{0.0330\,\text{V/A}} \qquad (\text{12-bit ADC resolution} \approx 24.4\,\text{mA/LSB}, \text{ or } \sim 6\,\text{mA} \text{ with } 16\times \text{ oversampling})$$
 
 ---
 
@@ -343,13 +392,13 @@ stateDiagram-v2
 #### Stage 1: Static Sensor Zero-Offset & Bus Reference Calibration ($\sim 1.0\,\text{s}$, Motor Off)
 * **Condition:** Motor disabled (`PWM = 0%`), arm stationary ($\dot{\theta}_m = 0$), patient limb detached.
 * **What It Measures ($N = 2000$ samples over $400\,\text{ms}$):**
-  1. **ACS712 Zero-Current Voltage Offset ($\hat{V}_{\text{ADC,0}}$) & Noise Floor ($\sigma_I$):** Eliminates $5\,\text{V}$ buck regulator tolerance and resistor divider tolerance errors:
-     $$\hat{V}_{\text{ADC,0}} = \frac{1}{N}\sum_{k=1}^{N} V_{\text{ADC,ACS}}[k], \qquad \Delta I_{\text{offset}} = \frac{\hat{V}_{\text{ADC,0}} - 1.500\,\text{V}}{0.0396\,\text{V/A}}$$
-  2. **Idle Bus Voltage Baseline ($\hat{V}_{\text{bus,idle}}$):** Reads the unloaded SMPS bus voltage and sets dynamic brake chopper thresholds $V_{\text{chop,on}} = \hat{V}_{\text{bus,idle}} + 0.50\,\text{V}$ and $V_{\text{chop,max}} = \hat{V}_{\text{bus,idle}} + 2.50\,\text{V}$.
-  3. **Pad Load Cell Zero Tare ($F_{\text{pad,tare}}$):** Tares the unloaded strain gauge / load cell at the shin pad.
+  1. **ACS712 Zero-Current Voltage Offset ($\hat{V}_{\text{ADC,0}}$) & Noise Floor ($\sigma_I$):** Eliminates $5.05\,\text{V}$ buck regulator tolerance and `R13 = 22 kΩ / R14 = 22 kΩ` ($1:1$, $0.50\times$) resistor divider tolerance errors:
+     $$\hat{V}_{\text{ADC,0}} = \frac{1}{N}\sum_{k=1}^{N} V_{\text{ADC,ACS}}[k], \qquad \Delta I_{\text{offset}} = \frac{\hat{V}_{\text{ADC,0}} - 1.250\,\text{V}}{0.0330\,\text{V/A}}$$
+  2. **Idle Bus Voltage Baseline ($\hat{V}_{\text{bus,idle}}$):** Reads the unloaded SMPS bus voltage via `R11` ($3\times 220\,\text{k}\Omega\parallel = 73.33\,\text{k}\Omega$) / `R12` ($4.6\,\text{k}\Omega$) on `U2 GPIO34` ($\approx 1.417\,\text{V}$ at $24.00\,\text{V}$, multiplier `VBUS_MULT = 16.942f`) and sets dynamic brake chopper thresholds $V_{\text{chop,on}} = \hat{V}_{\text{bus,idle}} + 0.50\,\text{V}$ and $V_{\text{chop,max}} = \hat{V}_{\text{bus,idle}} + 2.50\,\text{V}$.
+  3. **Optional Pad Load Cell Zero Tare ($F_{\text{pad,tare}}$):** If the optional shin-pad strain gauge / load cell expansion sensor is populated, tares its unloaded baseline reading.
 
 #### Stage 2: Hard-Stop Encoder Homing, Polarity Verification & Backlash Measurement ($\sim 5.0\,\text{s}$)
-* **Step 2A — Current-Limited Homing Creep:** The ESP32 creeps the arm toward the mechanical hard stop at a low speed ($\sim 3^\circ/\text{s}$) while the **ACS712** actively caps motor current to $I_{\text{home}} \le 2.5\,\text{A}$ ($\tau_{\text{gbx}} < 5\,\text{N}\cdot\text{m}$).
+* **Step 2A — Current-Limited Homing Creep:** The ESP32 creeps the arm toward the mechanical hard stop (`STOP1`) at a low speed ($\sim 3^\circ/\text{s}$) while the **ACS712 (`U203`)** actively caps motor current to $I_{\text{home}} \le 2.5\,\text{A}$ ($\tau_{\text{gbx}} < 5\,\text{N}\cdot\text{m}$).
 * **Step 2B — Polarity Auto-Correction ($s_{\text{dir}}, s_{\text{enc}} \in \{+1, -1\}$):** During the first $100\,\text{ms}$ of motion, if the encoder count changes opposite to the expected direction, software automatically flips the encoder/direction polarity flag $s_{\text{enc}}$ so reversed A/B encoder wires never cause positive-feedback runaway.
 * **Step 2C — Contact Detection & Elastic Windup Release:** When $|\dot{\theta}_m| < 0.2^\circ/\text{s}$ and $|I_m| \ge 2.0\,\text{A}$ continuously for $250\,\text{ms}$, hard-stop contact is confirmed. Motor PWM is set to $0\%$ for $250\,\text{ms}$ to release elastic shaft windup, and the `PCNT` register is latched to `THETA_HARD_STOP_DEG` ($\theta_{\text{stop}}$).
 * **Step 2D — Empirical Gearbox Backlash Identification ($\hat{\theta}_{\text{backlash}}$):** By applying a tiny reverse micro-current ($-0.6\,\text{A}$) until gear teeth lightly kiss the opposite flank and then pulsing $+0.6\,\text{A}$ back against the stop, the controller measures the exact angular play $\hat{\theta}_{\text{backlash}}$ (verifying $\hat{\theta}_{\text{backlash}} \le 50\,\text{arcmin} = 0.833^\circ$).
@@ -358,7 +407,7 @@ stateDiagram-v2
 * **Why Needed:** Assumed $R_{\text{loop}} = 0.40\,\Omega$ can vary between $0.33\,\Omega$ and $0.58\,\Omega$ due to wiring length, connector resistance, brush wear, and copper temperature ($+0.393\%/^\circ\text{C}$).
 * **Procedure:** While the arm remains seated against the hard mechanical stop ($\omega_m = 0 \implies E_{\text{bemf}} = 0$), the controller applies two brief ($150\,\text{ms}$) low-duty test pulses: $D_1 = 6\%$ ($\sim 3.5\,\text{A}$) and $D_2 = 12\%$ ($\sim 7.0\,\text{A}$, producing $< 18\,\text{N}\cdot\text{m}$, well below the $60\,\text{N}\cdot\text{m}$ continuous gearbox rating).
 * **Exact Differential Calculation:** Using the steady-state ACS712 currents $I_1, I_2$ and bus voltages $V_{\text{bus},1}, V_{\text{bus},2}$:
-  $$\boxed{\hat{R}_{\text{loop}} = \frac{D_2 V_{\text{bus},2} - D_1 V_{\text{bus},1}}{I_2 - I_1}, \qquad \hat{V}_{\text{brush}} = D_1 V_{\text{bus},1} - \hat{R}_{\text{loop}} I_1}$$
+  $$\boxed{\hat{R}_{\text{loop}} = \frac{D_2 V_{\text{bus},1} - D_1 V_{\text{bus},1}}{I_2 - I_1} \approx \frac{D_2 V_{\text{bus},2} - D_1 V_{\text{bus},1}}{I_2 - I_1}, \qquad \hat{V}_{\text{brush}} = D_1 V_{\text{bus},1} - \hat{R}_{\text{loop}} I_1}$$
   *(Differential two-point measurement cancels out non-linear brush contact voltage drop $\hat{V}_{\text{brush}}$ and MOSFET switching dead-time!)*
 
 #### Stage 4: Unloaded Arm Sweep — Identifying $\hat{K}_e, \hat{K}_t, \hat{I}_0, \hat{\tau}_{\text{stiction}}, \hat{B}_{\text{visc}}, \hat{\tau}_{\text{arm,grav}}$ ($\sim 10\,\text{s}$)
@@ -374,15 +423,14 @@ stateDiagram-v2
      $$\hat{\tau}_{\text{arm,grav}}(\theta_m) = G \eta_{\text{fwd}} \hat{K}_t \left(\frac{I_{\text{ext}}(\theta_m, \omega_m) - I_{\text{flex}}(\theta_m, \omega_m)}{2}\right) = \hat{\tau}_{\text{arm},0}\cos\theta_m$$
 
 #### Stage 5: Patient Limb Gravity Scan & Empirical Gearbox Efficiency Calibration ($\sim 8\,\text{s}$, Limb Strapped In)
-* **Procedure:** Once the patient's leg is strapped into the padded cuff (and $d_{\text{offset}}, L_{\text{leg}}$ are confirmed on the Web GUI), the controller performs one slow, gentle passive sweep ($2.5^\circ/\text{s}$) across the patient's safe ROM while the patient relaxes completely.
-* **What It Identifies Using Dual Sensor Fusion (Pad Load Cell $F_{\text{pad}}$ + ACS712 Current $I_m$):**
-  1. **Patient-Specific Limb Gravity Curve ($\hat{\tau}_{\text{limb,grav}}(\theta_k)$):**
-     Measured directly at the shin pad by the load cell:
-     $$\hat{\tau}_{\text{limb,grav}}(\theta_k) = F_{\text{pad,passive}}(\theta_k) \cdot L_{\text{leg}} \approx \hat{\tau}_{g,0}\cos\theta_k$$
-  2. **Empirical Forward & Back-Driving Gearbox Efficiencies ($\hat{\eta}_{\text{fwd}}, \hat{\eta}_{\text{back}}$):**
-     During the upward extension lift (motor driving the heavy leg against gravity, Quadrant I), the load cell measures true output torque delivered to the leg $\tau_{\text{gbx,meas}} = F_{\text{pad}}(\theta_k) L_{\text{eff}}(\theta_k) + \hat{\tau}_{\text{arm,grav}}(\theta_m)$, while the ACS712 measures motor current $I_{m,\text{up}}$:
+* **Procedure:** Once the patient's leg is strapped into the padded cuff (and $d_{\text{offset}}, L_{\text{leg}}$ are confirmed on the Web GUI), the controller performs one slow, gentle bidirectional passive sweep ($2.5^\circ/\text{s}$) across the patient's safe ROM while the patient relaxes completely.
+* **What It Identifies (Primary `ACS712-30A` Mode + Optional Pad Load Cell Fusion):**
+  1. **Primary Mode (Using `U203: ACS712-30A` Bidirectional Current Differential):**
+     Subtracting the unloaded metal-arm current profile from the passive limb-strapped upward extension current $I_{m,\text{up}}(\theta_k)$ and downward flexion current $I_{m,\text{down}}(\theta_k)$ directly isolates the patient's anatomical lower-leg gravitational torque curve without requiring an external load cell:
+     $$\boxed{\hat{\tau}_{\text{limb,grav}}(\theta_k) = \frac{G \eta_{\text{fwd}} \hat{K}_t \left(\frac{I_{m,\text{up}}(\theta_k) - I_{m,\text{down}}(\theta_k)}{2}\right) - \hat{\tau}_{\text{arm,grav}}(\theta_m)}{\Gamma(\theta_k)} \approx \hat{\tau}_{g,0}\cos\theta_k}$$
+  2. **Optional Dual-Sensor Fusion Mode (When Shin-Pad Load Cell $F_{\text{pad}}$ Is Populated):**
+     If the optional $50\,\text{kg}$ pad strain gauge / load cell is connected, $\hat{\tau}_{\text{limb,grav}}(\theta_k) = F_{\text{pad,passive}}(\theta_k) \cdot L_{\text{leg}}$ is measured directly at the pad, and comparing $F_{\text{pad}}(\theta_k)$ against `ACS712` current $I_{m,\text{up}}, I_{m,\text{down}}$ further refines the empirical forward and back-driving gearbox efficiencies:
      $$\boxed{\hat{\eta}_{\text{fwd}} = \frac{F_{\text{pad,up}}(\theta_k) L_{\text{eff}}(\theta_k) + \hat{\tau}_{\text{arm,grav}}(\theta_m)}{G \hat{K}_t (I_{m,\text{up}} - \hat{I}_0)}}$$
-     During the downward flexion lowering (heavy leg back-driving the motor, Quadrant IV), comparing pad torque against motor braking current $I_{m,\text{down}}$ yields the empirical back-driving efficiency $\hat{\eta}_{\text{back}}$ and dynamic friction $\hat{\tau}_{\text{fric}}$!
 
 ---
 
@@ -391,16 +439,16 @@ stateDiagram-v2
 #### Table 5.3: Complete Parameter Identification & Correction Factor Matrix
 | Symbol | Physical Parameter | Previously Assumed Value | How Setup Routine Identifies It | Calculated Correction Factor Applied in $1\,\text{kHz}$ Loop | Purpose for Smooth Operation |
 | :---: | :--- | :---: | :--- | :--- | :--- |
-| **$\hat{V}_{\text{ADC,0}}$** | ACS712 $0\,\text{A}$ ADC Midpoint | $1.500\,\text{V}$ ($2.50\,\text{V}$ pre-divider) | Stage 1: $2000\text{-sample}$ average at PWM $= 0\%$ | $\Delta I_{\text{offset}} = \frac{\hat{V}_{\text{ADC,0}} - 1.500}{0.0396}$ | Eliminates steady-state torque bias & false current readings at rest |
-| **$\hat{V}_{\text{bus,idle}}$** | Main DC Bus Idle Voltage | $24.00\,\text{V}$ | Stage 1: ADC average at idle | $\kappa_{\text{Vbus}} = \frac{\hat{V}_{\text{bus,idle}}}{24.0}$ | Scales PWM feedforward & auto-tracks chopper threshold $V_{\text{chop,on}}$ |
-| **$\hat{\theta}_{\text{stop}}, s_{\text{enc}}$** | Encoder Datum & Polarity | Manual zero, assumed $+1$ | Stage 2: Current-limited stall against stop | $s_{\text{enc}} \in \{+1, -1\}$, $\text{Count}_{\text{init}}$ | Guarantees repeatable absolute angle & prevents inverted-wire runaway |
+| **$\hat{V}_{\text{ADC,0}}$** | ACS712 $0\,\text{A}$ ADC Midpoint (`IO35`) | $1.250\,\text{V}$ ($2.50\,\text{V}$ pre-`R13/R14` $1:1$ divider) | Stage 1: $2000\text{-sample}$ average at PWM $= 0\%$ | $\Delta I_{\text{offset}} = \frac{\hat{V}_{\text{ADC,0}} - 1.250}{0.0330}$ | Eliminates steady-state torque bias & false current readings at rest |
+| **$\hat{V}_{\text{bus,idle}}$** | Main DC Bus Idle Voltage (`IO34`) | $24.00\,\text{V}$ ($1.417\,\text{V}$ via `R11/R12`) | Stage 1: ADC average at idle | $\kappa_{\text{Vbus}} = \frac{\hat{V}_{\text{bus,idle}}}{24.0}$ | Scales PWM feedforward & auto-tracks chopper threshold $V_{\text{chop,on}}$ |
+| **$\hat{\theta}_{\text{stop}}, s_{\text{enc}}$** | Encoder Datum & Polarity | Manual zero, assumed $+1$ | Stage 2: Current-limited stall against `STOP1` | $s_{\text{enc}} \in \{+1, -1\}$, $\text{Count}_{\text{init}}$ | Guarantees repeatable absolute angle & prevents inverted-wire runaway |
 | **$\hat{\theta}_{\text{backlash}}$** | Gearbox Output Backlash | $\le 50\,\text{arcmin}$ ($0.833^\circ$) | Stage 2: Bidirectional micro-current kiss test | $C_{\text{lash}}(\Delta\theta_{\text{rev}}) = 1 - 0.7 e^{-(\Delta\theta_{\text{rev}}/\hat{\theta}_{\text{backlash}})^2}$ | Softens torque ramp across gear tooth gap to eliminate mechanical clunk |
 | **$\hat{R}_{\text{loop}}$** | Total Armature Loop Resistance | $0.40\,\Omega$ | Stage 3: Blocked-rotor two-point pulse ($D_1, D_2$) | $\kappa_R(T) = \frac{\hat{R}_{\text{loop}}}{0.40\,\Omega}$ *(updated at holds)* | Compensates wire resistance & thermal copper heating ($\Delta R_a(T)$) |
 | **$\hat{V}_{\text{brush}}$** | Brush + H-Bridge Dead-Zone Drop | $0.00\,\text{V}$ (ignored) | Stage 3: Zero-current intercept of $V\text{–}I$ line | $D_{\text{dead}} = \frac{\hat{V}_{\text{brush}}}{V_{\text{bus}}}\,\text{sign}(I_{\text{ref}})$ | Eliminates low-speed deadband stalling during slow $1^\circ/\text{s}$ CPM |
 | **$\hat{K}_e, \hat{K}_t$** | Motor EMF & Torque Constant | $0.0694\,\text{N}\cdot\text{m/A}$ | Stage 4: Unloaded two-speed steady-state sweep | $\kappa_{Kt} = \frac{\hat{K}_t}{0.0694}$ | Ensures $1:1$ accuracy between commanded current and electromagnetic torque |
 | **$\hat{I}_{\text{breakaway}}$** | Static Breakaway Stiction Current | $1.00\,\text{A}$ ($\tau_{\text{fric}} \approx 2.5\,\text{N}\cdot\text{m}$) | Stage 4: Slow PWM ramp at $\theta_m = 90^\circ$ until motion | $I_{\text{ff,fric}}(\dot{\theta}_m) = (\hat{I}_0 + \hat{b}_{\text{visc}}|\dot{\theta}_m|)\tanh\!\left(\frac{\dot{\theta}_m}{\omega_\epsilon}\right)$ | Smooth hyperbolic-tangent friction compensation eliminates stick-slip jerk |
-| **$\hat{\eta}_{\text{fwd}}, \hat{\eta}_{\text{back}}$** | Forward & Back-Drive Efficiency | $0.85 \;/\; 0.85$ | Stage 5: Pad Load Cell vs. ACS712 current ratio | $\kappa_{\eta,\text{fwd}} = \frac{\hat{\eta}_{\text{fwd}}}{0.85}, \quad \kappa_{\eta,\text{back}} = \frac{\hat{\eta}_{\text{back}}}{0.85}$ | Matches actual mechanical pad force to target clinical prescription |
-| **$\hat{\tau}_{\text{grav}}(\theta_k)$** | Arm + Patient Lower-Leg Weight | $12.0\cos\theta_k\,\text{N}\cdot\text{m}$ | Stage 4 & 5: Bidirectional passive scan | $\tau_{\text{ff,grav}}(\theta_k) = \hat{\tau}_{\text{arm,grav}}(\theta_m) + \Gamma(\theta_k)\hat{\tau}_{\text{limb,grav}}(\theta_k)$ | Makes the patient's leg feel weightless or accurately gravity-compensated |
+| **$\hat{\eta}_{\text{fwd}}, \hat{\eta}_{\text{back}}$** | Forward & Back-Drive Efficiency | $0.85 \;/\; 0.85$ | Stage 5: Calibrated nominal ($0.85$) or Load Cell vs. `ACS712` ratio | $\kappa_{\eta,\text{fwd}} = \frac{\hat{\eta}_{\text{fwd}}}{0.85}, \quad \kappa_{\eta,\text{back}} = \frac{\hat{\eta}_{\text{back}}}{0.85}$ | Matches actual mechanical pad force to target clinical prescription |
+| **$\hat{\tau}_{\text{grav}}(\theta_k)$** | Arm + Patient Lower-Leg Weight | $12.0\cos\theta_k\,\text{N}\cdot\text{m}$ | Stage 4 & 5: Bidirectional passive scan (`ACS712` / Load Cell) | $\tau_{\text{ff,grav}}(\theta_k) = \hat{\tau}_{\text{arm,grav}}(\theta_m) + \Gamma(\theta_k)\hat{\tau}_{\text{limb,grav}}(\theta_k)$ | Makes the patient's leg feel weightless or accurately gravity-compensated |
 | **$\Gamma(\theta_k)$** | Offset-Pivot Moment Arm Factor | $1.00$ (collinear assumed) | Stage 5: Configured $d_{\text{offset}}$ ($8\text{–}10\,\text{cm}$) & $L_{\text{leg}}$ | $\Gamma(\theta_k) = 1 + \frac{d_{\text{offset}}}{L_{\text{leg}}}\sin\theta_k$ | Converts desired anatomical knee torque into required gearbox shaft torque |
 
 #### Online Thermal Resistance Tracking During Therapy Sessions
@@ -411,28 +459,27 @@ $$\hat{R}_{\text{loop}}^{(k)} = 0.95\,\hat{R}_{\text{loop}}^{(k-1)} + 0.05\,\lef
 
 ## 6. Spasm Control & Emergency Hard-Stop Architecture
 
-Post-operative orthopedic and neurological patients frequently exhibit involuntary **muscle spasms, pain-guarding reflexes, extensor/flexor catches, or rhythmic clonus**. Furthermore, at any instant during therapy, either a medically sensed anomaly or a direct user/clinician command from the **Master ESP Web GUI (`ESP_MASTER`)** must be able to trigger an immediate, safe **Hard Stop**.
+Post-operative orthopedic and neurological patients frequently exhibit involuntary **muscle spasms, pain-guarding reflexes, extensor/flexor catches, or rhythmic clonus**. Furthermore, at any instant during therapy, either a medically sensed anomaly or a direct user/clinician command from the **Master ESP Web GUI (`U1: ESP_MASTER`)** must be able to trigger an immediate, safe **Hard Stop**.
 
-### 6.1 Integration of the Pad Strain Gauge / Mini Load Cell Sensor
-While the **ACS712-30A** senses motor armature current, a $1:52$ gearbox reflects $52^2 = 2704\times$ the motor's rotor inertia and possesses $\sim 2.5\,\text{N}\cdot\text{m}$ of breakaway friction plus $\le 50\,\text{arcmin}$ backlash. Consequently, when a patient's muscle suddenly spasms, the force spike appears **immediately at the shin padding** several milliseconds before it overcomes gearbox friction/backlash to register on the motor shaft.
-
-* **Mechanical Integration:** A compact **$50\,\text{kg}$ ($490\,\text{N}$) Low-Profile Bending-Beam or Mini Button Load Cell (Strain Gauge Bridge)** is mounted directly between the structural metal orthosis arm link and the padded shin cuff carrier where the user's leg applies force (at distance $L_{\text{leg}}$ from the knee pivot).
-* **Signal Conditioning:** Driven by an instrumentation amplifier (`INA125` / `AD623` sampled at $1\,\text{kHz}$ by the ESP32 ADC, or `HX711` configured with `RATE = DVDD` for $80\,\text{Hz}$ low-latency conversion), providing direct normal force measurement $F_{\text{pad}}(t)$ with $\pm 0.5\,\text{N}$ resolution.
-* **Direct Torque & Force Relationships:**
-  $$\tau_{\text{knee,meas}}(t) = F_{\text{pad}}(t) \cdot L_{\text{leg}}, \qquad \tau_{\text{gbx,meas}}(t) = F_{\text{pad}}(t) \cdot \left(L_{\text{leg}} + d_{\text{offset}}\sin\theta_k\right)$$
+### 6.1 Primary (`ACS712-30A` + `ENC1`) & Optional (`50 kg` Pad Load Cell) Sensor Fusion
+1. **Primary Hardware Protection Layer (`U203: ACS712-30A` + `ENC1: 74,880 CPR` Motor-Shaft Encoder):**
+   In the baseline hardware build ([`Sheet 2`](schematic_page2_top_hub_control.svg) & [`WIRING_AND_COMMISSIONING_GUIDE.md`](WIRING_AND_COMMISSIONING_GUIDE.md)), the $1:52$ gearbox possesses high mechanical efficiency ($\eta = 85\%$) and low breakaway friction ($\approx 2.5\,\text{N}\cdot\text{m}$), while `ENC1` on the motor shaft resolves output motion to $0.00481^\circ/\text{count}$. Combining $2\,\text{kHz}$ `ACS712-30A` current residual monitoring ($|I_{\text{ACS712}} - I_{\text{model}}|$) with `ENC1` velocity-jerk ($\ddot{\theta}_m$) detection reconstructs equivalent pad force $F_{\text{pad,est}}(t) = \frac{\hat{\tau}_{\text{gbx}}(I_m, \dot{\theta}_m)}{L_{\text{leg}} + d_{\text{offset}}\sin\theta_k}$ in real time without requiring external load-cell wiring.
+2. **Optional Expansion Layer ($50\,\text{kg}$ Shin-Pad Strain Gauge / Mini Load Cell on `GPIO36` or `GPIO21/22`):**
+   A compact **$50\,\text{kg}$ ($490\,\text{N}$) Low-Profile Bending-Beam or Mini Button Load Cell** can be mounted between the orthosis arm (`arm_link-2.STEP`) and the padded shin cuff (driven via `INA125` on `U2 GPIO36` or $80\,\text{Hz}$ `HX711` on `GPIO21/22`) to measure direct contact force $F_{\text{pad}}(t)$ a few milliseconds before gearbox backlash ($\le 50\,\text{arcmin}$) is traversed:
+   $$\tau_{\text{knee,meas}}(t) = F_{\text{pad}}(t) \cdot L_{\text{leg}}, \qquad \tau_{\text{gbx,meas}}(t) = F_{\text{pad}}(t) \cdot \left(L_{\text{leg}} + d_{\text{offset}}\sin\theta_k\right)$$
 
 ---
 
 ### 6.2 Tri-Modal Spasm & Medical Anomaly Detection Algorithm ($1\,\text{kHz}$ Supervisor)
 
-The `ESP_TOPHUB` safety supervisor evaluates four parallel medical anomaly detectors every $1\,\text{ms}$:
+The `ESP_TOPHUB` safety supervisor evaluates four parallel medical anomaly detectors every $1\,\text{ms}$ (operating seamlessly on `ACS712-30A` + `ENC1` alone, or fused with the optional Pad Load Cell when present):
 
-| Detector Channel | Sensor Source | Mathematical Trigger Condition | Clinical / Biomechanical Meaning |
+| Detector Channel | Sensor Source (Primary / Optional Expansion) | Mathematical Trigger Condition | Clinical / Biomechanical Meaning |
 | :--- | :--- | :--- | :--- |
-| **1. Pad Force Rate Spike (Acute Spasm / Reflex Catch)** | Pad Strain Gauge / Load Cell ($F_{\text{pad}}$) | $\left|\dfrac{dF_{\text{pad}}}{dt}\right| > \dot{F}_{\text{spasm}} \;\;(\text{default } 350\,\text{N/s})$<br>OR $|F_{\text{pad}} - F_{\text{expected}}(\theta_k)| > F_{\text{spasm,lim}}$ *(e.g., $> 50\,\text{N} \implies 15\,\text{N}\cdot\text{m}$ in CPM)* | Sudden involuntary muscle contraction or sharp pain-guarding catch against the pad |
-| **2. Armature Current Residual Spike** | ACS712-30A ($I_m$) | $|I_{\text{ACS712}}(t) - I_{\text{model}}(\theta_k, \dot{\theta}_k)| > \Delta I_{\text{spasm}}$ *(default $3.5\,\text{A}$ for $> 30\,\text{ms}$)* | Redundant motor-side torque overload detection (protects even if load cell wire is faulted) |
-| **3. Clonus Oscillation Detector ($5\text{–}8\,\text{Hz}$)** | Pad Load Cell ($F_{\text{pad}}$) + Optical Encoder ($\dot{\theta}_k$) | $\ge 3$ alternating force/velocity reversals within $600\,\text{ms}$ in the $4\text{–}9\,\text{Hz}$ band | Pathological stretch-reflex clonus triggered by excessive dorsiflexion/knee stretch speed |
-| **4. Sudden Pain Yield / "Giving Way" Drop-Off** | Pad Load Cell ($F_{\text{pad}}$) + Optical Encoder ($\dot{\theta}_k$) | During active resistive push ($F_{\text{pad}} > 60\,\text{N}$), $\dfrac{dF_{\text{pad}}}{dt} < -500\,\text{N/s}$ with sudden velocity drop | Acute joint pain causing instant quadriceps/hamstring arthrogenic inhibition (patient gives way) |
+| **1. Force / Torque Rate Spike (Acute Spasm / Reflex Catch)** | `U203` `ACS712-30A` ($dI_m/dt$) + `ENC1` ($\ddot{\theta}_m$)<br>*(+ Optional Pad Load Cell $F_{\text{pad}}$)* | $\left|\dfrac{dF_{\text{pad}}}{dt}\right| > \dot{F}_{\text{spasm}} \;\;(\text{default } 350\,\text{N/s})$<br>OR $|F_{\text{pad}} - F_{\text{expected}}(\theta_k)| > F_{\text{spasm,lim}}$ *(e.g., $> 50\,\text{N} \implies 15\,\text{N}\cdot\text{m}$ in CPM)* | Sudden involuntary muscle contraction or sharp pain-guarding catch against the pad |
+| **2. Armature Current Residual Spike** | `U203` `ACS712-30A` ($I_m$ on `GPIO35`) | $|I_{\text{ACS712}}(t) - I_{\text{model}}(\theta_k, \dot{\theta}_k)| > \Delta I_{\text{spasm}}$ *(default $3.5\,\text{A}$ for $> 30\,\text{ms}$)* | Direct motor-side torque overload detection across all 4 quadrants |
+| **3. Clonus Oscillation Detector ($5\text{–}8\,\text{Hz}$)** | `ENC1` ($\dot{\theta}_k$ on `GPIO32/33`) + `U203` ($I_m$) | $\ge 3$ alternating force/velocity reversals within $600\,\text{ms}$ in the $4\text{–}9\,\text{Hz}$ band | Pathological stretch-reflex clonus triggered by excessive knee stretch speed |
+| **4. Sudden Pain Yield / "Giving Way" Drop-Off** | `U203` ($I_m$) + `ENC1` ($\dot{\theta}_k$) | During active resistive push ($F_{\text{pad}} > 60\,\text{N}$), $\dfrac{dF_{\text{pad}}}{dt} < -500\,\text{N/s}$ with sudden velocity drop | Acute joint pain causing instant quadriceps/hamstring arthrogenic inhibition (patient gives way) |
 
 ---
 
@@ -568,31 +615,31 @@ flowchart LR
 
 ---
 
-## 9. Closed-Loop Control Architecture on `ESP_TOPHUB`
+## 9. Closed-Loop Control Architecture on `U2: ESP_TOPHUB`
 
 ```mermaid
 flowchart TD
-    ENC["360 PPR Optical Encoder\n(PCNT 4x Quadrature)"] -->|"θ_m, dθ_m/dt (1 kHz)"| KIN["Offset-Pivot Kinematic Transform\nθ_k = θ_m - arcsin((d_offset/L_leg)cos θ_m)\nΓ(θ_k) = 1 + (d_offset/L_leg)sin θ_k"]
+    ENC["ENC1: 360 PPR NPN Encoder on M1 Shaft\n(GPIO32/33 PCNT 4x = 74,880 CPR)"] -->|"θ_m, dθ_m/dt (1 kHz)"| KIN["Offset-Pivot Kinematic Transform\nθ_k = θ_m - arcsin((d_offset/L_leg)cos θ_m)\nΓ(θ_k) = 1 + (d_offset/L_leg)sin θ_k"]
     
-    SG["Pad Strain Gauge / 50kg Load Cell\n(At Tibial Distance L_leg)"] -->|"F_pad(t), dF_pad/dt (1 kHz)"| SPASM["Tri-Modal Spasm & Hard-Stop Supervisor\n(|dF/dt| > 350 N/s, ΔI_m > 3.5A, Clonus, GUI E-Stop)"]
-    ACS["ACS712 30A Current Sensor\n(Inline with Motor M+)"] -->|"I_m(t) (2 kHz)"| SPASM
-    GUI["Master ESP32 Web GUI\n(ESP-NOW Command & Hard-Stop Link)"] -->|"Mode, Targets, d_offset, L_leg,\nInstant Hard-Stop (<3ms)"| SPASM
+    SG["Optional Pad Strain Gauge / 50kg Load Cell\n(Expansion Port at Distance L_leg)"] -.->|"Optional F_pad(t), dF_pad/dt"| SPASM["Tri-Modal Spasm & Hard-Stop Supervisor\n(|dF/dt| > 350 N/s, ΔI_m > 3.5A, Clonus, GUI E-Stop)"]
+    ACS["U203: ACS712-30A Current Sensor\n(Inline M+, GPIO35 via R13/R14 22k/22k)"] -->|"I_m(t) (2 kHz)"| SPASM
+    GUI["U1: Master ESP32 Web GUI\n(ESP-NOW Ch 1 Command & Hard-Stop Link)"] -->|"Mode, Targets, d_offset, L_leg,\nInstant Hard-Stop (<3ms)"| SPASM
 
     KIN -->|"θ_k, dθ_k/dt, Γ(θ_k)"| CTRL["Trajectory, Mode & Calibration Supervisor\n(Applies NVS Correction Factors:\nκ_R, κ_Kt, C_lash, I_ff_fric, τ_ff_grav)"]
     SPASM -->|"Normal / Backoff / Hard-Stop Lock"| CTRL
     
     CTRL -->|"Target Current I_ref(t)"| PI_I["2 kHz Closed-Loop Current PI + Feedforward\nD_req = FF(I_ref, R_loop, K_e) + PI(I_ref - I_ACS712)"]
     ACS -->|"Measured I_m(t)"| PI_I
-    PI_I -->|"PWM (20 kHz) + DIR"| DRV["Rhino MD20Amp H-Bridge\n-> MY1016 + 1:52 (85%) Gearbox"]
+    PI_I -->|"GPIO25 MD_PWM (20 kHz) + GPIO26 MD_DIR"| DRV["U201: Rhino MD20Amp H-Bridge\n-> M1: MY1016 + GBX1: 1:52 (85%) Gearbox"]
     
-    ADC["ESP32 ADC (Bus Voltage Divider)"] -->|"V_bus (5 kHz)"| CHOP["Brake Chopper Proportional Controller\nActive when V_bus > V_bus_idle + 0.5V"]
-    CHOP -->|"PWM_CHOP"| MOS["30A Heatbed MOSFET -> 1.0Ω 200W Resistors"]
+    ADC["U2 GPIO34 ADC1 (VBUS_SENSE\nvia R11=73.33k / R12=4.6k)"] -->|"V_bus (5 kHz)"| CHOP["Brake Chopper Proportional Controller\nActive when V_bus > V_bus_idle + 0.5V"]
+    CHOP -->|"GPIO27 CHOP_PWM (5 kHz)"| MOS["R1||R2 (1.0Ω 200W) -> U202: 30A MOSFET"]
 ```
 
-### Real-Time Control Loop Rates & Peripheral Allocation on `ESP_TOPHUB`
-1. **Brake Chopper Protection Loop (`5 kHz` Timer ISR):** Samples `VBUS_SENSE` and regulates the 30A MOSFET module (`PWM_CHOP`) to clamp regenerative voltage surges between $\hat{V}_{\text{bus,idle}} + 0.5\,\text{V}$ and $\hat{V}_{\text{bus,idle}} + 2.5\,\text{V}$.
-2. **Inner Armature Current PI Loop (`2 kHz` Synchronized ADC + `MCPWM`):** Oversamples the **ACS712-30A** output (`16x` hardware/FIR averaging), subtracts the calibrated zero-offset $\hat{V}_{\text{ADC,0}}$, enforces the $20.0\,\text{A}$ software current clamp (protecting the $100\,\text{N}\cdot\text{m}$ gearbox ceiling), and updates the $20\,\text{kHz}$ H-Bridge PWM duty cycle.
+### Real-Time Control Loop Rates & Peripheral Allocation on `U2: ESP_TOPHUB`
+1. **Brake Chopper Protection Loop (`5 kHz` Timer ISR on `GPIO34` $\rightarrow$ `GPIO27`):** Samples `VBUS_SENSE` (`R11 = 73.33 kΩ` / `R12 = 4.6 kΩ`, $1.417\,\text{V}$ @ $24.0\,\text{V}$) and regulates the 2-screw 30A MOSFET module (`U202` via `CHOP_PWM` with `R16 = 22 kΩ` pull-down) to switch the high-side parallel resistor bank (`R1 || R2` $= 1.0\,\Omega, 200\,\text{W}$), clamping regenerative voltage surges between $\hat{V}_{\text{bus,idle}} + 0.5\,\text{V}$ and $\hat{V}_{\text{bus,idle}} + 2.5\,\text{V}$.
+2. **Inner Armature Current PI Loop (`2 kHz` Synchronized ADC on `GPIO35` + `MCPWM` on `GPIO25/26`):** Oversamples the **ACS712-30A (`U203`)** output (`16x` hardware/FIR averaging after the `R13 = 22 kΩ / R14 = 22 kΩ` $1:1$ divider, $33.0\,\text{mV/A}$), subtracts the calibrated zero-offset $\hat{V}_{\text{ADC,0}}$ ($\approx 1.250\,\text{V}$), enforces the $20.0\,\text{A}$ software current clamp (protecting the $100\,\text{N}\cdot\text{m}$ gearbox ceiling), and updates the $20\,\text{kHz}$ H-Bridge PWM duty cycle on `U201` (`R15 = 220 kΩ` pull-down).
 3. **Outer Kinematic, Spasm & Trajectory Supervisor (`1 kHz` FreeRTOS Real-Time Task on Core 1):**
-   * Reads `PCNT` quadrature encoder counts, applies $2\text{nd}$-order Butterworth velocity filtering ($f_c = 25\,\text{Hz}$), and executes the **Offset-Pivot Kinematic Transform** ($\theta_m \rightarrow \theta_k$ and $\Gamma(\theta_k) = 1 + \frac{d_{\text{offset}}}{L_{\text{leg}}}\sin\theta_k$).
-   * Reads the **Pad Strain Gauge / Load Cell** force $F_{\text{pad}}(t)$ and evaluates the **Tri-Modal Spasm & Hard-Stop Supervisor** (reacting in $< 1\,\text{ms}$ to pad force spikes or $< 3\,\text{ms}$ to Master ESP Web GUI Hard-Stop commands).
+   * Reads `PCNT` quadrature encoder counts from `ENC1` (`GPIO32/33` with `R3, R5 = 80 Ω` series damping + `INPUT_PULLUP`, $74,880\,\text{counts/output rev}$), applies $2\text{nd}$-order Butterworth velocity filtering ($f_c = 25\,\text{Hz}$), and executes the **Offset-Pivot Kinematic Transform** ($\theta_m \rightarrow \theta_k$ and $\Gamma(\theta_k) = 1 + \frac{d_{\text{offset}}}{L_{\text{leg}}}\sin\theta_k$).
+   * Evaluates the **Tri-Modal Spasm & Hard-Stop Supervisor** using `U203` (`ACS712-30A`) current residuals/derivatives + `ENC1` velocity/clonus tracking (plus optional **Pad Strain Gauge / Load Cell** force $F_{\text{pad}}(t)$ if populated), reacting in $< 1\,\text{ms}$ to spasm spikes or $< 3\,\text{ms}$ to Master ESP (`U1`) Web GUI Hard-Stop commands.
    * Applies the calibrated **Smooth-Working Correction Factors** ($\kappa_R(T), \kappa_{Kt}, D_{\text{dead}}, I_{\text{ff,fric}}(\dot{\theta}_m), C_{\text{lash}}, \hat{\tau}_{\text{grav}}(\theta_k)$) to generate seamless, clunk-free, and anatomically accurate torque across the entire rehabilitation range of motion.

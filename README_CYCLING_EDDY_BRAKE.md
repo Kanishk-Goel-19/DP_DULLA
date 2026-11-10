@@ -1,39 +1,49 @@
-# Bottom-Tier Cycling Rehabilitation System — Symmetrical Eddy Current Brake, Flywheel Drive & Inverse-Dynamics Pedal Force Observer
+# Bottom-Tier Cycling Rehabilitation System (`U3: ESP_CYCLING`) — Symmetrical Eddy Current Brake, Flywheel Drive & Inverse-Dynamics Pedal Force Observer
+
+> [!NOTE]
+> **Repository Cross-Reference Index (`Project Doula — VK26-IITI-HT-0240`):**
+> * **Master Index & Top-Hub Knee Module (`U2: ESP_TOPHUB`):** [`README.md`](README.md)
+> * **Integrated 3-ESP32 Network & Clinical Web GUI (`U1: ESP_MASTER`):** [`README_INTEGRATED_SYSTEM_AND_WEB_APP.md`](README_INTEGRATED_SYSTEM_AND_WEB_APP.md)
+> * **Pin-by-Pin Hardware Wiring & Commissioning Guide:** [`WIRING_AND_COMMISSIONING_GUIDE.md`](WIRING_AND_COMMISSIONING_GUIDE.md)
+> * **Electrical & Mechanical Schematics:** [`System_Schematics_3Page.pdf`](System_Schematics_3Page.pdf) | [`Sheet 3 (Bottom Cycling U3)`](schematic_page3_bottom_cycling_ecb.svg) | [`Sheet 4 (Master BOM)`](schematic_page4_bom.svg)
+> * **SolidWorks 3D CAD & SKF Bearing Models:** [`Doula_DP_parts_only/Doula_DP_parts_only/`](Doula_DP_parts_only/Doula_DP_parts_only/)
+
+---
 
 ## 1. System Overview
 
-This document specifies the mechanical design, electromagnetic braking physics, stepper actuation kinematics, and closed-loop ESP32 control algorithm for the **Bottom-Tier Cycling Rehabilitation Module**. 
+This document specifies the mechanical design, SKF bearing architecture, electromagnetic braking physics, stepper actuation kinematics, and closed-loop ESP32 control algorithm for the **Bottom-Tier Cycling Rehabilitation Module (`U3: ESP_CYCLING`)**.
 
-The system utilizes a **1:5 internal-gear pedal-to-flywheel step-up transmission**, an **$8\,\text{mm} \times 290\,\text{mm}$ aluminum flywheel**, and a **symmetrical double-sided axial-flux N52 Eddy Current Brake (ECB)** whose braking intensity is modulated over a **$0^\circ \text{ to } 45^\circ$ angular stroke** via a **$1:6$ stepper motor drive** ($1.2\,\text{N}\cdot\text{m}$ holding torque). Using a single **$360\,\text{PPR}$ optical encoder** on the flywheel shaft and the exact moment of inertia of the rotating assembly, the controller executes a real-time **Inverse-Dynamics Pedal Force / Torque Observer** to detect patient pedaling effort, estimate leg torque/power without external load cells, and dynamically regulate braking resistance.
-
----
-
-## 2. Hardware Architecture & Mechanical Specifications
-
-### 2.1 Component & Geometry Summary
-
-| Subsystem | Component / Material | Dimensions & Ratings | Functional Role |
-| :--- | :--- | :--- | :--- |
-| **Pedal Input & Ring Gear** | Pedals on Acrylic Carrier + **Internal Rim Gear** ($4\,\text{mm}$ Mild Steel) | Driven directly by patient's feet ($\omega_{\text{pedal}}$, $\tau_{\text{pedal}}$) | Transfers lower-limb cycling torque into the primary gear stage |
-| **Step-Up Pinion Gear** | **Spur Pinion Gear** ($4\,\text{mm}$ Mild Steel) | **Ratio $1:5$** ($G_{\text{pedal}} = \omega_{\text{fly}} / \omega_{\text{pedal}} = 5$); single active output shaft | Steps up pedal cadence by $5\times$ to generate high eddy-current velocity and $25\times$ reflected flywheel inertia |
-| **Flywheel Rotor** | **Solid Aluminum Disk** (Al 6061-T6) | Thickness $d_{\text{Al}} = 8\,\text{mm}$, Diameter $D_{\text{Al}} = 290\,\text{mm}$ ($R_{\text{Al}} = 145\,\text{mm}$), $\rho = 2700\,\text{kg/m}^3$ | Conductive eddy-current rotor and kinetic energy storage ($m_{\text{Al}} = 1.427\,\text{kg}$) |
-| **Symmetrical Stator Disks** | **2$\times$ $5\,\text{mm}$ Acrylic Disks** (Left & Right of Flywheel) | **$2\,\text{mm}$ axial air gap** on each side of the $8\,\text{mm}$ Al flywheel | Holds opposing permanent magnet arrays in a symmetrical axial-flux sandwich |
-| **Permanent Magnets** | **8$\times$ N52 NdFeB Magnets per Stator** ($16$ total in symmetrical pair) | **$30\,\text{mm} \times 10\,\text{mm} \times 5\,\text{mm}$**, $B_r \approx 1.45\,\text{T}$, spaced equally every **$45^\circ$** in **alternating N–S–N–S** polarity | Generates axial magnetic field $B_z$ across the spinning aluminum flywheel |
-| **Resistance Modulator** | **Stepper Motor + $1:6$ Gear Reduction** | Stepper holding torque $\tau_{\text{hold}} = 1.2\,\text{N}\cdot\text{m}$; **6 stepper turns = 1 magnet disk turn** | Rotates the movable magnet stator disk from **$0^\circ \text{ to } 45^\circ$** ($270^\circ$ stepper rotation) to vary flux linkage from minimum to maximum |
-| **Flywheel Sensor** | **2-Phase Incremental Optical Encoder** | $360\,\text{PPR}$ ($1440\,\text{CPR}$ with $4\times$ quadrature decoding), $5\,\text{V}$ supply | Measures flywheel angle $\theta_{\text{fly}}$, angular velocity $\omega_{\text{fly}}$, and angular acceleration $\alpha_{\text{fly}} = \ddot{\theta}_{\text{fly}}$ |
-| **Controller** | **ESP32 Microcontroller** | Dual-core $240\,\text{MHz}$, Hardware `PCNT` decoder, Stepper `STEP`/`DIR` generator | Runs the Inverse-Dynamics Pedal Force Observer and Closed-Loop Stepper Braking Controller |
+The subsystem utilizes a **1:5 internal-gear pedal-to-flywheel step-up transmission (`GR1` $\rightarrow$ `GP1`)**, an **$8\,\text{mm} \times 290\,\text{mm}$ aluminum flywheel (`FLY1`)**, and a **symmetrical double-sided axial-flux N52 Eddy Current Brake (`STAT1`, `STAT2`)** whose braking intensity is modulated over a **$0^\circ \text{ to } 45^\circ$ angular stroke** via a **$1:6$ stepper motor drive (`M2` + `GBX2` + `U301: TB6600/DM542`)** ($1.2\,\text{N}\cdot\text{m}$ holding torque). Using a single **$360\,\text{PPR}$ NPN Open-Collector optical encoder (`ENC2`, conditioned via `R7, R9 = 80 Ω` series damping + `INPUT_PULLUP`)** on the flywheel shaft and the exact moment of inertia of the rotating assembly ($J_{\text{fly,eff}} = 0.01630\,\text{kg}\cdot\text{m}^2$), `U3` executes a real-time $100\,\text{Hz}$ **Inverse-Dynamics Pedal Force / Torque Observer** to detect patient pedaling effort, estimate leg torque/power without external load cells, dynamically regulate braking resistance, and stream $50\,\text{Hz}$ telemetry (`CyclingTelemetryPacket_t`) to `U1: ESP_MASTER` over **ESP-NOW (Channel 1)**.
 
 ---
 
-### 2.2 Mechanical & Control Schematic
+## 2. Hardware Architecture, Schematic Designators & CAD Correlation
+
+### 2.1 Component & Geometry Summary (Correlated with [`Sheet 3`](schematic_page3_bottom_cycling_ecb.svg) & [`Sheet 4 BOM`](schematic_page4_bom.svg))
+
+| Schematic ID | Subsystem / Component | Dimensions, Ratings & Verified Wiring | Functional Role |
+| :---: | :--- | :--- | :--- |
+| **`GR1`** | **Pedal Input & Internal Ring Gear** | Wide pedals ($L_{\text{crank}} = 170\,\text{mm}$) on acrylic carrier + **$4\,\text{mm}$ Mild Steel Internal Rim Gear**; supported on **SKF 6004-2RSL** & **SKF 619/6-2Z** bearings | Transfers patient lower-limb cycling torque ($\omega_{\text{pedal}}, \tau_{\text{pedal}}$) into the primary gear stage |
+| **`GP1`** | **Step-Up Spur Pinion Gear** | **$4\,\text{mm}$ Mild Steel Spur Pinion**; **Ratio $1:5$** ($G_{\text{pedal}} = \omega_{\text{fly}} / \omega_{\text{pedal}} = 5$); single active output shaft on **SKF 6205-Z** bearings | Steps up pedal cadence by $5\times$ to generate high eddy-current velocity and $25\times$ reflected flywheel inertia |
+| **`FLY1`** | **Conductive Flywheel Rotor** | **Solid Aluminum Disk (Al 6061-T6):** Thickness $d_{\text{Al}} = 8\,\text{mm}$, Diameter $D_{\text{Al}} = 290\,\text{mm}$ ($R_{\text{Al}} = 145\,\text{mm}$), $\rho = 2700\,\text{kg/m}^3$ | Conductive eddy-current rotor and kinetic energy storage ($m_{\text{Al}} = 1.427\,\text{kg}, J_{\text{Al}} = 0.01500\,\text{kg}\cdot\text{m}^2$) |
+| **`STAT1`, `STAT2`** | **Symmetrical Acrylic Stator Disks + 16$\times$ N52 Magnets** | **2$\times$ $5\,\text{mm}$ Acrylic Disks** (`STAT1` fixed, `STAT2` movable $\alpha \in [0^\circ, 45^\circ]$) with **$2\,\text{mm}$ axial air gap** per side; **8$\times$ N52 NdFeB Magnets per Stator** ($30\times 10\times 5\,\text{mm}$, $B_r \approx 1.45\,\text{T}$, spaced every **$45^\circ$** in **alternating N–S–N–S** polarity at $r_{\text{eff}} = 115\,\text{mm}$) | Generates symmetrical axial magnetic field $B_z$ across `FLY1`, varying from flux-canceling ($\alpha=0^\circ$) to flux-aiding ($\alpha=45^\circ$) |
+| **`M2` + `GBX2`** | **Stepper Motor & $1:6$ Gear Reduction** | Bipolar stepper holding torque $\tau_{\text{hold}} = \mathbf{1.2\,\text{N}\cdot\text{m}}$ + **$1:6$ gear stage (`GBX2`)** ($\tau_{\text{disk,hold}} = 6.12\,\text{N}\cdot\text{m}$); **6 stepper turns = 1 magnet disk turn** ($270^\circ$ stepper stroke = $0^\circ\text{–}45^\circ$ disk stroke) | Rotates movable magnet stator `STAT2` from $0^\circ \text{ to } 45^\circ$ ($1200$ microsteps at $8\times$) |
+| **`U301`** | **Opto-Isolated Stepper Driver (`TB6600 / DM542`)** | Powered from `+24V_BUS` & `STAR_GND`; `PUL+` $\leftarrow$ `U3 GPIO18` (`STEP_PUL`), `DIR+` $\leftarrow$ `U3 GPIO19` (`STEP_DIR`), `PUL-/DIR-` $\rightarrow$ `GND`, `ENA+/ENA-` left open | Drives `M2` coils (`A+/A-`, `B+/B-`) at $8\times$ microstepping ($1600\,\text{steps/rev}$) with continuous holding current enabled |
+| **`ENC2` + `R7, R9`** | **360 PPR NPN Open-Collector Flywheel Encoder** | Mounted on `FLY1` shaft ($1440\,\text{CPR}$ at $4\times$ decoding = **$7200\,\text{counts/pedal rev}$**); `+5V_BUCK` ($5.05\,\text{V}$) supply; `OUT_A/B` via **`R7, R9 = 80 Ω` series damping** to `U3 GPIO32/33` (`INPUT_PULLUP`, **no `GND` resistor**) | Measures flywheel angle $\theta_{\text{fly}}$ and angular velocity $\omega_{\text{fly}}$ for the Derivative-Free Momentum Disturbance Observer |
+| **`U3`** | **Bottom-Cycling Controller (`ESP_CYCLING`)** | **ESP32-S NodeMCU V1.1** powered via `+3V3_LDO` ($3.30\,\text{V}$ from `U5`); hardware `PCNT` on `GPIO32/33`, pulse gen on `GPIO18/19`, ESP-NOW Channel 1 link to `U1` (`ESP_MASTER`) | Executes $100\,\text{Hz}$ Momentum Torque Observer, anti-stall brake unloading, bilateral pedal symmetry ($\text{LSI}_{\text{cycle}}$), and $50\,\text{Hz}$ telemetry TX |
+
+---
+
+### 2.2 Mechanical & Control Schematic (Correlated with [`Sheet 3`](schematic_page3_bottom_cycling_ecb.svg))
 
 ```mermaid
 flowchart TD
-    subgraph Mechanical_Drive ["1:5 Pedal-to-Flywheel Mechanical Drivetrain"]
-        PED["Patient Pedals & Cranks\n(Cadence ω_pedal, Torque τ_pedal)"]
-        ACR_P["Acrylic Pedal Disc Carrier"]
-        RING["4mm Mild Steel Inner Rim Gear (Ring Gear)"]
-        PIN["4mm Mild Steel Pinion Gear (1:5 Ratio)\n(Single Active Drive Shaft)"]
+    subgraph Mechanical_Drive ["1:5 Pedal-to-Flywheel Mechanical Drivetrain (GR1 -> GP1)"]
+        PED["Patient Pedals & Cranks (L_crank = 170mm)\n(Cadence ω_pedal, Torque τ_pedal)"]
+        ACR_P["Acrylic Pedal Disc Carrier\n(SKF 6004-2RSL & 619/6-2Z Bearings)"]
+        RING["GR1: 4mm Mild Steel Inner Rim Gear (Ring Gear)"]
+        PIN["GP1: 4mm Mild Steel Pinion Gear (1:5 Ratio)\n(Single Active Shaft on SKF 6205-Z Bearings)"]
         SHAFT["Flywheel Drive Shaft\n(ω_fly = 5 * ω_pedal)"]
         
         PED --> ACR_P --> RING
@@ -41,33 +51,35 @@ flowchart TD
     end
 
     subgraph Symmetrical_ECB ["Symmetrical Eddy Current Brake & Flywheel Assembly"]
-        STAT_L["Fixed 5mm Acrylic Stator Disk\n(8x N52 Magnets 30x10x5mm, Alt N-S @ 45°)"]
-        FLY["Aluminum Flywheel Disk\n(Ø290mm, 8mm Thick, J_Al = 0.0150 kg·m²)"]
-        STAT_R["Movable 5mm Acrylic Stator Disk\n(8x N52 Magnets 30x10x5mm, Alt N-S @ 45°)\nRotation α ∈ [0°, 45°]"]
+        STAT_L["STAT1: Fixed 5mm Acrylic Stator Disk\n(8x N52 Magnets 30x10x5mm, Alt N-S @ 45°)"]
+        FLY["FLY1: Aluminum Flywheel Disk\n(Ø290mm, 8mm Thick, J_Al = 0.0150 kg·m²)"]
+        STAT_R["STAT2: Movable 5mm Acrylic Stator Disk\n(8x N52 Magnets 30x10x5mm, Alt N-S @ 45°)\nRotation α ∈ [0°, 45°]"]
         
         SHAFT --> FLY
         STAT_L -.->|"2mm Air Gap (Left)"| FLY
         STAT_R -.->|"2mm Air Gap (Right)"| FLY
     end
 
-    subgraph Stepper_Actuation ["1:6 Stepper Resistance Modulation Stage"]
-        STEP["Stepper Motor (1.2 N·m Holding Torque)\n(0.75 Rev = 270° Stroke for 0°–45° Disk)"]
-        G_STEP["1:6 Reduction Gear\n(τ_hold,disk ≈ 6.1 N·m)"]
-        SDRV["Stepper Driver (STEP / DIR)"]
+    subgraph Stepper_Actuation ["1:6 Stepper Resistance Modulation Stage (U301 + M2 + GBX2)"]
+        STEP["M2: Stepper Motor (1.2 N·m Holding Torque)\n(0.75 Rev = 270° Stroke for 0°–45° Disk)"]
+        G_STEP["GBX2: 1:6 Reduction Gear\n(τ_hold,disk = 6.12 N·m)"]
+        SDRV["U301: TB6600 / DM542 Driver\n(24V Bus, PUL+ IO18, DIR+ IO19)"]
         
         SDRV --> STEP -->|"6:1 Reduction"| G_STEP -->|"Sets Angle α (0° to 45°)"| STAT_R
     end
 
-    subgraph Sensing_Control ["ESP32 Sensing, Pedal Force Observer & Control Loop"]
-        ENC["360 PPR Optical Encoder (1440 CPR @ 4x)\nMounted on Flywheel Shaft"]
-        ESP["ESP32 Controller"]
-        OBS["Inverse-Dynamics Pedal Force Observer\nτ_user = J_eff * dω/dt + τ_eddy(α, ω) + τ_fric(ω)"]
-        ALGO["Rehab Control Law\n(Pedal Detection, Anti-Stall, Target α*)"]
+    subgraph Sensing_Control ["U3: ESP_CYCLING Sensing, Observer & ESP-NOW Link"]
+        ENC["ENC2: 360 PPR NPN Encoder (1440 CPR @ 4x)\n(R7, R9 = 80Ω Series + U3 IO32/33 INPUT_PULLUP)"]
+        ESP["U3: ESP32-S NodeMCU V1.1 (ESP_CYCLING)"]
+        OBS["100 Hz Luenberger Momentum Disturbance Observer\nτ_user = J_eff * dω/dt + τ_eddy(α, ω) + τ_fric(ω)"]
+        ALGO["Rehab Control & Anti-Stall Law\n(Pedal Detection, Target α*, <3ms Hard-Stop)"]
+        MASTER["U1: ESP_MASTER Clinical Web GUI\n(ESP-NOW Ch 1 @ 50 Hz Telemetry / Cmd)"]
         
         SHAFT -.-> ENC
-        ENC -->|"Ch A/B Pulses (θ_fly, ω_fly, dω_fly/dt)"| ESP
+        ENC -->|"Ch A/B Pulses (7200 cnt/pedal rev)"| ESP
+        MASTER <-->|"RehabCommandPacket_t / CyclingTelemetryPacket_t"| ESP
         ESP --> OBS --> ALGO
-        ALGO -->|"STEP + DIR Pulses (Command α*)"| SDRV
+        ALGO -->|"STEP_PUL (IO18) + STEP_DIR (IO19)"| SDRV
     end
 ```
 
@@ -76,25 +88,42 @@ flowchart TD
 ### 2.3 Cross-Sectional Schematic of the Symmetrical Eddy Current Brake
 
 ```text
-          FIXED STATOR            SPINNING ROTOR           MOVABLE STATOR (0°–45°)
-         (5mm Acrylic)           (8mm Aluminum)               (5mm Acrylic)
-              |                        |                            |
-              v                        v                            v
-          +-------+                +--------+                   +-------+
-          |       |   2mm Gap      |        |      2mm Gap      |       |
-          |[N   S]| <------------> |   ||   | <---------------> |[N   S]|  <-- 30x10x5mm N52
-          |       |                |   ||   |                   |       |      (r_eff ≈ 115mm)
-          |       |                |   ||   |                   |       |
-  ========+=======+================+========+===================+=======+========  Flywheel Shaft
-          |       |                |   ||   |                   |       |      (ω_fly = 5·ω_pedal)
-          |[S   N]| <------------> |   ||   | <---------------> |[S   N]|
-          |       |                |   ||   |                   |       |
-          +-------+                +--------+                   +-------+
-                                  Ø290mm Disk                        ^
-                                                                     |
-                                                       Driven via 1:6 Gear by
-                                                     1.2 N·m Stepper (α = 0°..45°)
+         STAT1: FIXED STATOR       FLY1: SPINNING ROTOR     STAT2: MOVABLE STATOR (0°–45°)
+            (5mm Acrylic)             (8mm Aluminum)               (5mm Acrylic)
+                  |                         |                            |
+                  v                         v                            v
+              +-------+                 +--------+                   +-------+
+              |       |     2mm Gap     |        |      2mm Gap      |       |
+              |[N   S]| <-------------> |   ||   | <---------------> |[N   S]|  <-- 30x10x5mm N52
+              |       |                 |   ||   |                   |       |      (r_eff ≈ 115mm)
+              |       |                 |   ||   |                   |       |
+  ============+=======+=================+========+===================+=======+========  Flywheel Shaft
+  (SKF 6205-Z)|       |                 |   ||   |                   |       |      (ω_fly = 5·ω_pedal)
+              |[S   N]| <-------------> |   ||   | <---------------> |[S   N]|
+              |       |                 |   ||   |                   |       |
+              +-------+                 +--------+                   +-------+
+                                        Ø290mm Disk                      ^
+                                                                         |
+                                                           Driven via GBX2 (1:6 Gear) by
+                                                         M2: 1.2 N·m Stepper (α = 0°..45°)
 ```
+
+---
+
+### 2.4 SolidWorks 3D CAD Files & SKF Bearing Specifications ([`Doula_DP_parts_only/`](Doula_DP_parts_only/Doula_DP_parts_only/))
+
+All mechanical components of the Bottom-Tier Cycling and Eddy-Current Brake module are modeled in SolidWorks and correlated directly with the analytical inertia and torque equations in Sections 3 and 4:
+
+| Schematic / CAD Subsystem | Repository CAD File(s) (`.STEP` / `.SLDPRT` / `.DXF`) | Material & Verified Mechanical Specifications |
+| :--- | :--- | :--- |
+| **Complete Dual-Tier Assembly** | [`Whole_cycling _assembly_part-1.STEP`](Doula_DP_parts_only/Doula_DP_parts_only/Whole_cycling%20_assembly_part-1.STEP) | Integrated mild-steel frame, $1:5$ cycling transmission, $\varnothing 290\,\text{mm}$ flywheel, symmetrical stators, and top-hub telescopic orthosis arm |
+| **`GR1`: Pedal Wheel & $1:5$ Internal Ring Gear** | [`NEW_gear_pedal_wheel.STEP`](Doula_DP_parts_only/Doula_DP_parts_only/NEW_gear_pedal_wheel.STEP)<br>[`pedal_gear.STEP`](Doula_DP_parts_only/Doula_DP_parts_only/pedal_gear.STEP) \| [`gear_wheel.STEP`](Doula_DP_parts_only/Doula_DP_parts_only/gear_wheel.STEP)<br>[`pedal_attachment.STEP`](Doula_DP_parts_only/Doula_DP_parts_only/pedal_attachment.STEP) | $4\,\text{mm}$ mild-steel internal ring gear mounted on spoked carrier with wide ergonomic pedal platforms and spring-loaded foot retaining flaps ($L_{\text{crank}} = 0.170\,\text{m}$) |
+| **`FLY1` + `GP1`: Aluminum Flywheel & $1:5$ Pinion** | [`NEW_flywheel_and_gear.STEP`](Doula_DP_parts_only/Doula_DP_parts_only/NEW_flywheel_and_gear.STEP)<br>[`flywheel_and_gear.STEP`](Doula_DP_parts_only/Doula_DP_parts_only/flywheel_and_gear.STEP) \| [`flywheel_and_gear.DXF`](Doula_DP_parts_only/Doula_DP_parts_only/flywheel_and_gear.DXF)<br>[`spur gear_iso.DXF`](Doula_DP_parts_only/Doula_DP_parts_only/spur%20gear_iso.DXF) \| [`spur gear_iso.SLDDRW`](Doula_DP_parts_only/Doula_DP_parts_only/spur%20gear_iso.SLDDRW) | $\varnothing 290\times 8\,\text{mm}$ solid Al 6061-T6 rotor ($m_{\text{Al}} = 1.427\,\text{kg}, J_{\text{Al}} = 0.01500\,\text{kg}\cdot\text{m}^2$) + $4\,\text{mm}$ mild-steel spur pinion ($1:5$ step-up, $J_{\text{pinion+shaft}} = 0.00050\,\text{kg}\cdot\text{m}^2$) |
+| **`STAT1`: Fixed N52 Stator Plate & Stand** | [`NEW_static_magneticplate&stand.STEP`](Doula_DP_parts_only/Doula_DP_parts_only/NEW_static_magneticplate%26stand.STEP)<br>[`NEW_static_magneticplate&stand.step.SLDPRT`](Doula_DP_parts_only/Doula_DP_parts_only/NEW_static_magneticplate%26stand.step.SLDPRT)<br>[`static_magneticplate&stand.STEP`](Doula_DP_parts_only/Doula_DP_parts_only/static_magneticplate%26stand.STEP) | Fixed $5\,\text{mm}$ laser-cut acrylic stator disk & rigid base stand holding $8\times$ alternating N52 rectangular magnets ($30\times 10\times 5\,\text{mm}$) at $2\,\text{mm}$ axial air gap |
+| **`STAT2`: Movable N52 Stator Plate ($0^\circ\text{–}45^\circ$)** | [`rotating_magnetic_plate.STEP`](Doula_DP_parts_only/Doula_DP_parts_only/rotating_magnetic_plate.STEP) | Rotatable $5\,\text{mm}$ acrylic stator disk with peripheral gear teeth meshing with `GBX2` ($1:6$ reduction from `M2` $1.2\,\text{N}\cdot\text{m}$ stepper) over $\alpha \in [0^\circ, 45^\circ]$ |
+| **Flywheel Shaft Bearings (`SKF 6205-Z`)** | [`bearings_flywheel/6205-z.SLDASM`](Doula_DP_parts_only/Doula_DP_parts_only/bearings_flywheel/6205-z.SLDASM)<br>[`bearings_flywheel/6205-z.txt`](Doula_DP_parts_only/Doula_DP_parts_only/bearings_flywheel/6205-z.txt) | **SKF Explorer `6205-Z`** Deep-Groove Ball Bearing: Bore $d = \mathbf{25\,\text{mm}}$, OD $D = \mathbf{52\,\text{mm}}$, Width $B = \mathbf{15\,\text{mm}}$, Dynamic Load Rating $C = \mathbf{14.8\,\text{kN}}$, Limiting Speed $18,000\,\text{RPM}$, single non-contact shield |
+| **Pedal Wheel Bearings (`SKF 6004-2RSL`)** | [`pedal_wheels_bearings/6004-2rsl.SLDASM`](Doula_DP_parts_only/Doula_DP_parts_only/pedal_wheels_bearings/6004-2rsl.SLDASM)<br>[`pedal_wheels_bearings/6004-2rsl.txt`](Doula_DP_parts_only/Doula_DP_parts_only/pedal_wheels_bearings/6004-2rsl.txt) | **SKF Explorer `6004-2RSL`** Deep-Groove Ball Bearing: Bore $d = \mathbf{20\,\text{mm}}$, OD $D = \mathbf{42\,\text{mm}}$, Width $B = \mathbf{12\,\text{mm}}$, Dynamic Load Rating $C = \mathbf{9.95\,\text{kN}}$, Limiting Speed $19,000\,\text{RPM}$, dual low-friction `RSL` seals |
+| **Guide Roller Bearings (`SKF 619/6-2Z`)** | [`roller_bearings/619_6-2z.SLDASM`](Doula_DP_parts_only/Doula_DP_parts_only/roller_bearings/619_6-2z.SLDASM)<br>[`roller_bearings/619_6-2z.txt`](Doula_DP_parts_only/Doula_DP_parts_only/roller_bearings/619_6-2z.txt) | **SKF `619/6-2Z`** Miniature Deep-Groove Ball Bearing: Bore $d = \mathbf{6\,\text{mm}}$, OD $D = \mathbf{15\,\text{mm}}$, Width $B = \mathbf{5\,\text{mm}}$, Dynamic Load Rating $C = \mathbf{0.884\,\text{kN}}$, Limiting Speed $50,000\,\text{RPM}$, dual non-contact shields |
 
 #### Why the $0^\circ \text{ to } 45^\circ$ Rotation Works with 8 Alternating Magnets
 Because there are **8 magnets** spaced equally around the circumference, the angular pitch between adjacent alternating poles ($\text{N}$ and $\text{S}$) is:
@@ -258,18 +287,21 @@ In a rehabilitation ergometer, if the control algorithm regulates constant torqu
 
 ```mermaid
 stateDiagram-v2
-    [*] --> HOME_STEPPER : Power On
-    HOME_STEPPER --> IDLE_READY : Stepper Homed to α = 0° Limit Switch / Stop
+    [*] --> HOME_STEPPER : Power On / Boot
+    HOME_STEPPER --> IDLE_READY : Stepper Homed to α = 0° Stop
     
-    IDLE_READY --> SOFT_START_RAMP : Pedal Force Detected (τ_pedal > 2.5 N·m & ω_fly > 2 rad/s)
+    IDLE_READY --> SOFT_START_RAMP : Pedal Force Detected (τ_pedal > 2.5 N·m & ω_fly > 1.5 rad/s)
     
     SOFT_START_RAMP --> ACTIVE_THERAPY_CONTROL : Smooth 1.5s Ramp to Target Angle α*
     SOFT_START_RAMP --> COAST_UNLOAD : User Stops Pushing (τ_pedal < 1.2 N·m for 300ms)
     
     ACTIVE_THERAPY_CONTROL --> COAST_UNLOAD : User Stops Pushing (τ_pedal < 1.2 N·m for 300ms)
+    ACTIVE_THERAPY_CONTROL --> HARD_STOP_UNLOAD : Master Web GUI Hard-Stop (<3ms) OR Link Timeout (>500ms)
     
     COAST_UNLOAD --> SOFT_START_RAMP : User Resumes Pedaling (τ_pedal > 2.5 N·m)
     COAST_UNLOAD --> IDLE_READY : Flywheel Stops (ω_fly < 0.5 rad/s)
+    
+    HARD_STOP_UNLOAD --> IDLE_READY : Retract STAT2 to α = 5° Standby & Await GUI Reset
 ```
 
 ---
@@ -278,9 +310,9 @@ stateDiagram-v2
 
 When `PEDAL_ACTIVE == true`, the ESP32 computes the required flywheel eddy-current braking torque $\tau_{\text{eddy,req}}$ based on the selected clinical rehabilitation mode:
 
-1. **Mode A — Constant Pedal Resistance Torque ($\tau_{\text{pedal,target}}$ set by clinician, e.g. $10\text{–}55\,\text{N}\cdot\text{m}$):**
+1. **Mode A — Constant Pedal Resistance Torque ($\tau_{\text{pedal,target}}$ set by clinician, e.g. $5\text{–}55\,\text{N}\cdot\text{m}$ continuous non-backdriving range, up to $85\,\text{N}\cdot\text{m}$ peak):**
    $$\tau_{\text{eddy,req}} = \frac{\tau_{\text{pedal,target}}}{5} - \hat{\tau}_{\text{loss,fly}}(\omega_{\text{fly}})$$
-2. **Mode B — Constant Power / Ergometer Mode ($P_{\text{target}}$ set by clinician, e.g. $25\text{–}250\,\text{W}$):**
+2. **Mode B — Constant Power / Ergometer Mode ($P_{\text{target}}$ set by clinician, e.g. $20\text{–}250\,\text{W}$):**
    $$\tau_{\text{eddy,req}} = \frac{P_{\text{target}}}{\omega_{\text{fly}}} - \hat{\tau}_{\text{loss,fly}}(\omega_{\text{fly}})$$
 3. **Mode C — Isokinetic Cadence-Clamping Mode ($\text{RPM}_{\text{pedal,target}}$ fixed, e.g. $45\,\text{RPM}$):**
    $$\tau_{\text{eddy,req}} = K_p (\omega_{\text{fly}} - 5\omega_{\text{pedal,target}}) + K_i \int (\omega_{\text{fly}} - 5\omega_{\text{pedal,target}})\,dt$$
@@ -298,19 +330,29 @@ $$S^* = \text{round}\left( \frac{\alpha^*}{45.0^\circ} \times S_{\text{max}} \ri
 
 ---
 
-### 5.4 ESP32 Real-Time Control & Pedal-Force Observer Algorithm (Reference C/C++ Implementation)
+### 5.4 `U3: ESP_CYCLING` Real-Time Control & Pedal-Force Observer Algorithm (Reference C/C++ Implementation)
 
 ```cpp
 // ============================================================================
-// BOTTOM-TIER CYCLING REHAB: INVERSE-DYNAMICS OBSERVER & STEPPER ECB CONTROL
-// Execution Rate: 100 Hz (dt = 0.010 s) on ESP32 Timer Interrupt / RTOS Task
+// U3 (ESP_CYCLING): BOTTOM-TIER CYCLING OBSERVER & STEPPER ECB CONTROL
+// Execution Rate: 100 Hz (dt = 0.010 s) on ESP32-S NodeMCU V1.1
+// Pinout (Sheet 3): ENC2_CHA = GPIO32 (INPUT_PULLUP via R7=80R),
+//                   ENC2_CHB = GPIO33 (INPUT_PULLUP via R9=80R),
+//                   STEP_PUL = GPIO18 (to U301 TB6600 PUL+),
+//                   STEP_DIR = GPIO19 (to U301 TB6600 DIR+)
 // ============================================================================
 
 #include <math.h>
 
+// --- 0. Verified Hardware Pin Definitions (U3: ESP32-S NodeMCU V1.1) ---
+constexpr int   PIN_ENC2_CHA       = 32;        // PCNT0 Ch A (via R7 = 80 Ohm, INPUT_PULLUP)
+constexpr int   PIN_ENC2_CHB       = 33;        // PCNT0 Ch B (via R9 = 80 Ohm, INPUT_PULLUP)
+constexpr int   PIN_STEP_PUL       = 18;        // TB6600 / DM542 PUL+ (PUL- tied to STAR_GND)
+constexpr int   PIN_STEP_DIR       = 19;        // TB6600 / DM542 DIR+ (DIR- tied to STAR_GND)
+
 // --- 1. Physical & Geometric Constants ---
-constexpr float GEAR_PEDAL_TO_FLY  = 5.0f;      // 1:5 inner rim to pinion step-up
-constexpr float GEAR_STEP_TO_DISK  = 6.0f;      // 1:6 stepper to magnet disk
+constexpr float GEAR_PEDAL_TO_FLY  = 5.0f;      // 1:5 inner rim (GR1) to pinion (GP1) step-up
+constexpr float GEAR_STEP_TO_DISK  = 6.0f;      // 1:6 stepper (M2) to magnet disk (STAT2) via GBX2
 constexpr float J_FLY_EFF          = 0.01630f;  // Total effective inertia at flywheel shaft [kg*m^2]
 constexpr float K_EDDY_MAX         = 0.715f;    // Max eddy damping coeff [N*m/(rad/s)]
 constexpr float OMEGA_CRIT         = 80.0f;     // Eddy inductive critical speed [rad/s]
@@ -319,7 +361,7 @@ constexpr float B_VISC_FRIC        = 0.004f;    // Viscous friction coeff [N*m*s
 constexpr float CRANK_LENGTH_M     = 0.170f;    // Pedal crank arm radius [m]
 
 // --- 2. Sensor & Actuator Constants ---
-constexpr float ENC_CPR_4X         = 1440.0f;   // 360 PPR * 4x quadrature
+constexpr float ENC_CPR_4X         = 1440.0f;   // 360 PPR * 4x quadrature (7200 cnts/pedal rev)
 constexpr float RAD_PER_COUNT      = (2.0f * M_PI) / ENC_CPR_4X;
 constexpr int   STEPS_AT_45_DEG    = 1200;      // 0.75 stepper rev at 1600 steps/rev (8x microstep)
 
@@ -347,8 +389,8 @@ float computeEddyTorqueFly(float alpha_deg, float omega_fly) {
     return K_EDDY_MAX * u_alpha * kloss;
 }
 
-// Main 100 Hz Control Loop Step
-void updateCyclingRehabControl(int32_t delta_enc_counts, float dt, float target_pedal_torque_nm) {
+// Main 100 Hz Control Loop Step (with Master ESP-NOW E-Stop Override)
+void updateCyclingRehabControl(int32_t delta_enc_counts, float dt, float target_pedal_torque_nm, bool estop_active) {
     // 1. Velocity Estimation from 360 PPR Optical Encoder (with 15 Hz low-pass filter)
     float omega_raw  = (delta_enc_counts * RAD_PER_COUNT) / dt;
     float lpf_alpha  = 0.48f; // ~15 Hz cutoff at 100 Hz sample rate
@@ -372,21 +414,21 @@ void updateCyclingRehabControl(int32_t delta_enc_counts, float dt, float target_
     float power_user_w    = (tau_pedal_est > 0.0f) ? (tau_pedal_est * omega_pedal) : 0.0f;
 
     // 5. Detect Whether User Is Actively Applying Force on Pedals (Hysteresis + Debounce)
-    if (tau_pedal_est >= PEDAL_ON_THRESH_NM && omega_fly_filt > 1.5f) {
+    if (!estop_active && tau_pedal_est >= PEDAL_ON_THRESH_NM && omega_fly_filt > 1.5f) {
         is_user_pedaling = true;
         coast_timer_s    = 0.0f;
         active_work_joules += power_user_w * dt;
-    } else if (tau_pedal_est < PEDAL_OFF_THRESH_NM || omega_fly_filt <= 0.8f) {
+    } else if (estop_active || tau_pedal_est < PEDAL_OFF_THRESH_NM || omega_fly_filt <= 0.8f) {
         coast_timer_s += dt;
-        if (coast_timer_s >= COAST_DEBOUNCE_S) {
+        if (estop_active || coast_timer_s >= COAST_DEBOUNCE_S) {
             is_user_pedaling = false;
         }
     }
 
     // 6. Compute Target Magnetic Disk Angle alpha_cmd [0° to 45°]
     float alpha_target_deg = 0.0f;
-    if (!is_user_pedaling) {
-        // User is coasting or stopped -> unload brake to 5° so flywheel doesn't lock up
+    if (estop_active || !is_user_pedaling) {
+        // E-Stop, coasting, or stopped -> unload brake to 5° so flywheel doesn't lock up
         alpha_target_deg = 5.0f;
     } else {
         // User is actively pedaling -> compute required eddy torque at flywheel

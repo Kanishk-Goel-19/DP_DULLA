@@ -4,152 +4,195 @@
   <rect x="35" y="35" width="1530" height="1030" fill="none" stroke="#1e293b" stroke-width="2"/>
 
   <!-- Simple Sheet Heading -->
-  <text x="65" y="80" fill="#0f172a" font-size="18" font-weight="bold">Sheet 2: Top Hub Motor Control, Brake Chopper &amp; Optical Encoder</text>
-  <line x1="65" y1="95" x2="770" y2="95" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="65" y="80" fill="#0f172a" font-size="18" font-weight="bold">Sheet 2: Top Hub Node (U2), ACS712-30A, 85% Gearbox, Series Chopper &amp; NPN Encoder</text>
+  <line x1="65" y1="95" x2="1080" y2="95" stroke="#94a3b8" stroke-width="1.5"/>
 
   <!-- ===================================================================== -->
-  <!-- 1. TOP HUB ESP32 CONTROLLER (U2) (TOP LEFT)                           -->
+  <!-- 1. TOP HUB ESP32-S NODEMCU V1.1 CONTROLLER (U2) (TOP LEFT)            -->
   <!-- ===================================================================== -->
-  <polygon points="75,208 200,208 215,220 200,232 75,232" fill="#ffffff" stroke="#0284c7" stroke-width="2"/>
-  <text x="140" y="224" fill="#0284c7" font-size="11" font-weight="bold" text-anchor="middle">+3V3_LDO</text>
-  <line x1="215" y1="220" x2="265" y2="220" stroke="#0284c7" stroke-width="2"/>
+  <polygon points="65,193 190,193 205,205 190,217 65,217" fill="#ffffff" stroke="#0284c7" stroke-width="2"/>
+  <text x="130" y="209" fill="#0284c7" font-size="11" font-weight="bold" text-anchor="middle">+3V3_LDO</text>
+  <line x1="205" y1="205" x2="245" y2="205" stroke="#0284c7" stroke-width="2"/>
 
-  <polygon points="75,268 200,268 215,280 200,292 75,292" fill="#ffffff" stroke="#d97706" stroke-width="2"/>
-  <text x="140" y="284" fill="#b45309" font-size="11" font-weight="bold" text-anchor="middle">VBUS_SENSE</text>
-  <line x1="215" y1="280" x2="265" y2="280" stroke="#d97706" stroke-width="2"/>
+  <polygon points="65,248 190,248 205,260 190,272 65,272" fill="#ffffff" stroke="#d97706" stroke-width="2"/>
+  <text x="130" y="264" fill="#b45309" font-size="11" font-weight="bold" text-anchor="middle">VBUS_SENSE</text>
+  <line x1="205" y1="260" x2="245" y2="260" stroke="#d97706" stroke-width="2"/>
 
-  <polygon points="75,328 200,328 215,340 200,352 75,352" fill="#ffffff" stroke="#15803d" stroke-width="2"/>
-  <text x="140" y="344" fill="#166534" font-size="11" font-weight="bold" text-anchor="middle">ENC1_CHA_3V3</text>
-  <line x1="215" y1="340" x2="265" y2="340" stroke="#15803d" stroke-width="2"/>
+  <polygon points="65,303 190,303 205,315 190,327 65,327" fill="#ffffff" stroke="#0284c7" stroke-width="2"/>
+  <text x="130" y="319" fill="#0369a1" font-size="11" font-weight="bold" text-anchor="middle">ACS712_SENSE</text>
+  <line x1="205" y1="315" x2="245" y2="315" stroke="#0284c7" stroke-width="2"/>
 
-  <polygon points="75,388 200,388 215,400 200,412 75,412" fill="#ffffff" stroke="#15803d" stroke-width="2"/>
-  <text x="140" y="404" fill="#166534" font-size="11" font-weight="bold" text-anchor="middle">ENC1_CHB_3V3</text>
-  <line x1="215" y1="400" x2="265" y2="400" stroke="#15803d" stroke-width="2"/>
+  <polygon points="65,358 190,358 205,370 190,382 65,382" fill="#ffffff" stroke="#15803d" stroke-width="2"/>
+  <text x="130" y="374" fill="#166534" font-size="11" font-weight="bold" text-anchor="middle">ENC1_CHA_3V3</text>
+  <line x1="205" y1="370" x2="245" y2="370" stroke="#15803d" stroke-width="2"/>
 
-  <polygon points="75,448 200,448 215,460 200,472 75,472" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
-  <text x="140" y="464" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">GND</text>
-  <line x1="215" y1="460" x2="265" y2="460" stroke="#0f172a" stroke-width="2"/>
+  <polygon points="65,413 190,413 205,425 190,437 65,437" fill="#ffffff" stroke="#15803d" stroke-width="2"/>
+  <text x="130" y="429" fill="#166534" font-size="11" font-weight="bold" text-anchor="middle">ENC1_CHB_3V3</text>
+  <line x1="205" y1="425" x2="245" y2="425" stroke="#15803d" stroke-width="2"/>
+
+  <polygon points="65,468 190,468 205,480 190,492 65,492" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="130" y="484" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">GND (STAR)</text>
+  <line x1="205" y1="480" x2="245" y2="480" stroke="#0f172a" stroke-width="2"/>
 
   <!-- U2: ESP32 Box -->
-  <rect x="265" y="175" width="280" height="330" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
-  <text x="405" y="160" fill="#0f172a" font-size="14" font-weight="bold" text-anchor="middle">U2: ESP32 (Top Hub)</text>
+  <rect x="245" y="165" width="285" height="350" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="387" y="150" fill="#0f172a" font-size="13" font-weight="bold" text-anchor="middle">U2: ESP32-S NodeMCU V1.1 (Top Hub)</text>
 
-  <text x="280" y="224" fill="#0284c7" font-size="11" font-weight="bold">3V3</text>
-  <text x="280" y="284" fill="#b45309" font-size="11" font-weight="bold">GPIO34 (ADC)</text>
-  <text x="280" y="344" fill="#166534" font-size="11" font-weight="bold">GPIO32 (ENC_A)</text>
-  <text x="280" y="404" fill="#166534" font-size="11" font-weight="bold">GPIO33 (ENC_B)</text>
-  <text x="280" y="464" fill="#0f172a" font-size="11" font-weight="bold">GND</text>
+  <text x="258" y="209" fill="#0284c7" font-size="11" font-weight="bold">3V3</text>
+  <text x="258" y="264" fill="#b45309" font-size="11" font-weight="bold">IO34 (ADC1_6)</text>
+  <text x="258" y="319" fill="#0369a1" font-size="11" font-weight="bold">IO35 (ADC1_7)</text>
+  <text x="258" y="374" fill="#166534" font-size="11" font-weight="bold">IO32 (PULLUP)</text>
+  <text x="258" y="429" fill="#166534" font-size="11" font-weight="bold">IO33 (PULLUP)</text>
+  <text x="258" y="484" fill="#0f172a" font-size="11" font-weight="bold">GND</text>
 
-  <text x="530" y="264" fill="#7c3aed" font-size="11" font-weight="bold" text-anchor="end">GPIO25 (PWM)</text>
-  <text x="530" y="334" fill="#7c3aed" font-size="11" font-weight="bold" text-anchor="end">GPIO26 (DIR)</text>
-  <text x="530" y="404" fill="#dc2626" font-size="11" font-weight="bold" text-anchor="end">GPIO27 (CHOP)</text>
+  <text x="518" y="234" fill="#7c3aed" font-size="11" font-weight="bold" text-anchor="end">IO25 (PWM)</text>
+  <text x="518" y="324" fill="#7c3aed" font-size="11" font-weight="bold" text-anchor="end">IO26 (DIR)</text>
+  <text x="518" y="404" fill="#dc2626" font-size="11" font-weight="bold" text-anchor="end">IO27 (CHOP)</text>
 
-  <line x1="545" y1="260" x2="595" y2="260" stroke="#7c3aed" stroke-width="2"/>
-  <polygon points="595,248 715,248 730,260 715,272 595,272" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
-  <text x="658" y="264" fill="#6d28d9" font-size="11" font-weight="bold" text-anchor="middle">MD_PWM</text>
+  <!-- MD_PWM + R15 (220k Pull-Down) -->
+  <line x1="530" y1="230" x2="600" y2="230" stroke="#7c3aed" stroke-width="2"/>
+  <circle cx="562" cy="230" r="3.5" fill="#7c3aed"/>
+  <line x1="562" y1="230" x2="562" y2="248" stroke="#0f172a" stroke-width="1.6"/>
+  <rect x="555" y="248" width="14" height="32" fill="#ffffff" stroke="#0f172a" stroke-width="1.6"/>
+  <text x="574" y="268" fill="#0f172a" font-size="9.5" font-weight="bold">R15 220k</text>
+  <line x1="562" y1="280" x2="562" y2="300" stroke="#0f172a" stroke-width="1.6"/>
+  <text x="562" y="311" fill="#0f172a" font-size="9" font-weight="bold" text-anchor="middle">GND</text>
 
-  <line x1="545" y1="330" x2="595" y2="330" stroke="#7c3aed" stroke-width="2"/>
-  <polygon points="595,318 715,318 730,330 715,342 595,342" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
-  <text x="658" y="334" fill="#6d28d9" font-size="11" font-weight="bold" text-anchor="middle">MD_DIR</text>
+  <polygon points="600,218 710,218 725,230 710,242 600,242" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+  <text x="658" y="234" fill="#6d28d9" font-size="11" font-weight="bold" text-anchor="middle">MD_PWM</text>
 
-  <line x1="545" y1="400" x2="595" y2="400" stroke="#dc2626" stroke-width="2"/>
-  <polygon points="595,388 715,388 730,400 715,412 595,412" fill="#ffffff" stroke="#dc2626" stroke-width="2"/>
+  <!-- MD_DIR -->
+  <line x1="530" y1="320" x2="600" y2="320" stroke="#7c3aed" stroke-width="2"/>
+  <polygon points="600,308 710,308 725,320 710,332 600,332" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+  <text x="658" y="324" fill="#6d28d9" font-size="11" font-weight="bold" text-anchor="middle">MD_DIR</text>
+
+  <!-- CHOP_PWM + R16 (22k Pull-Down) -->
+  <line x1="530" y1="400" x2="600" y2="400" stroke="#dc2626" stroke-width="2"/>
+  <circle cx="562" cy="400" r="3.5" fill="#dc2626"/>
+  <line x1="562" y1="400" x2="562" y2="418" stroke="#0f172a" stroke-width="1.6"/>
+  <rect x="555" y="418" width="14" height="32" fill="#ffffff" stroke="#0f172a" stroke-width="1.6"/>
+  <text x="574" y="438" fill="#0f172a" font-size="9.5" font-weight="bold">R16 22k</text>
+  <line x1="562" y1="450" x2="562" y2="470" stroke="#0f172a" stroke-width="1.6"/>
+  <text x="562" y="481" fill="#0f172a" font-size="9" font-weight="bold" text-anchor="middle">GND</text>
+
+  <polygon points="600,388 710,388 725,400 710,412 600,412" fill="#ffffff" stroke="#dc2626" stroke-width="2"/>
   <text x="658" y="404" fill="#b91c1c" font-size="11" font-weight="bold" text-anchor="middle">CHOP_PWM</text>
 
   <!-- ===================================================================== -->
-  <!-- 2. RHINO MD20A DRIVER, MY1016 MOTOR & 1:52 GEARBOX (TOP RIGHT)        -->
+  <!-- 2. RHINO MD20A, INLINE ACS712-30A, MY1016 & 1:52 GEARBOX (TOP RIGHT)  -->
   <!-- ===================================================================== -->
-  <polygon points="810,208 920,208 935,220 920,232 810,232" fill="#ffffff" stroke="#dc2626" stroke-width="2"/>
-  <text x="868" y="224" fill="#b91c1c" font-size="11" font-weight="bold" text-anchor="middle">+24V_BUS</text>
-  <line x1="935" y1="220" x2="980" y2="220" stroke="#dc2626" stroke-width="2"/>
+  <polygon points="755,193 850,193 865,205 850,217 755,217" fill="#ffffff" stroke="#dc2626" stroke-width="2"/>
+  <text x="805" y="209" fill="#b91c1c" font-size="10.5" font-weight="bold" text-anchor="middle">+24V_BUS</text>
+  <line x1="865" y1="205" x2="890" y2="205" stroke="#dc2626" stroke-width="2"/>
 
-  <polygon points="810,268 920,268 935,280 920,292 810,292" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
-  <text x="868" y="284" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">GND</text>
-  <line x1="935" y1="280" x2="980" y2="280" stroke="#0f172a" stroke-width="2"/>
+  <polygon points="755,248 850,248 865,260 850,272 755,272" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="805" y="264" fill="#0f172a" font-size="10.5" font-weight="bold" text-anchor="middle">GND</text>
+  <line x1="865" y1="260" x2="890" y2="260" stroke="#0f172a" stroke-width="2"/>
 
-  <polygon points="810,338 920,338 935,350 920,362 810,362" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
-  <text x="868" y="354" fill="#6d28d9" font-size="11" font-weight="bold" text-anchor="middle">MD_PWM</text>
-  <line x1="935" y1="350" x2="980" y2="350" stroke="#7c3aed" stroke-width="2"/>
+  <polygon points="755,313 850,313 865,325 850,337 755,337" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+  <text x="805" y="329" fill="#6d28d9" font-size="10.5" font-weight="bold" text-anchor="middle">MD_PWM</text>
+  <line x1="865" y1="325" x2="890" y2="325" stroke="#7c3aed" stroke-width="2"/>
 
-  <polygon points="810,398 920,398 935,410 920,422 810,422" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
-  <text x="868" y="414" fill="#6d28d9" font-size="11" font-weight="bold" text-anchor="middle">MD_DIR</text>
-  <line x1="935" y1="410" x2="980" y2="410" stroke="#7c3aed" stroke-width="2"/>
+  <polygon points="755,368 850,368 865,380 850,392 755,392" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+  <text x="805" y="384" fill="#6d28d9" font-size="10.5" font-weight="bold" text-anchor="middle">MD_DIR</text>
+  <line x1="865" y1="380" x2="890" y2="380" stroke="#7c3aed" stroke-width="2"/>
 
   <!-- U201: Rhino MD20Amp -->
-  <rect x="980" y="175" width="205" height="280" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
-  <text x="1082" y="160" fill="#0f172a" font-size="14" font-weight="bold" text-anchor="middle">U201: Rhino MD20A</text>
+  <rect x="890" y="165" width="165" height="250" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="972" y="150" fill="#0f172a" font-size="13" font-weight="bold" text-anchor="middle">U201: Rhino MD20A</text>
 
-  <text x="992" y="224" fill="#dc2626" font-size="11" font-weight="bold">+VCC</text>
-  <text x="992" y="284" fill="#0f172a" font-size="11" font-weight="bold">GND</text>
-  <text x="992" y="354" fill="#6d28d9" font-size="11" font-weight="bold">PWM</text>
-  <text x="992" y="414" fill="#6d28d9" font-size="11" font-weight="bold">DIR</text>
+  <text x="900" y="209" fill="#dc2626" font-size="11" font-weight="bold">+VCC</text>
+  <text x="900" y="264" fill="#0f172a" font-size="11" font-weight="bold">GND</text>
+  <text x="900" y="329" fill="#6d28d9" font-size="11" font-weight="bold">PWM</text>
+  <text x="900" y="384" fill="#6d28d9" font-size="11" font-weight="bold">DIR</text>
 
-  <text x="1172" y="265" fill="#dc2626" font-size="11" font-weight="bold" text-anchor="end">M+</text>
-  <text x="1172" y="355" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="end">M-</text>
+  <text x="1045" y="235" fill="#dc2626" font-size="11" font-weight="bold" text-anchor="end">M+</text>
+  <text x="1045" y="375" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="end">M-</text>
 
-  <line x1="1185" y1="261" x2="1245" y2="261" stroke="#dc2626" stroke-width="2.5"/>
-  <line x1="1185" y1="351" x2="1245" y2="351" stroke="#0f172a" stroke-width="2.5"/>
+  <!-- Inline U203: ACS712-30A Current Sensor on M+ -->
+  <line x1="1055" y1="231" x2="1085" y2="231" stroke="#dc2626" stroke-width="2.5"/>
+  <rect x="1085" y="195" width="145" height="140" fill="#ffffff" stroke="#0284c7" stroke-width="2"/>
+  <text x="1157" y="182" fill="#0369a1" font-size="12" font-weight="bold" text-anchor="middle">U203: ACS712-30A</text>
+  <text x="1093" y="235" fill="#dc2626" font-size="10.5" font-weight="bold">IP+</text>
+  <text x="1222" y="235" fill="#dc2626" font-size="10.5" font-weight="bold" text-anchor="end">IP-</text>
+  <text x="1093" y="275" fill="#b45309" font-size="10">VCC (+5V_BUCK)</text>
+  <text x="1093" y="298" fill="#0f172a" font-size="10">GND (STAR)</text>
+  <text x="1157" y="325" fill="#0369a1" font-size="10.5" font-weight="bold" text-anchor="middle">OUT (66mV/A)</text>
+
+  <!-- ACS712 22k / 22k 1:1 Divider (R13, R14) -->
+  <line x1="1157" y1="335" x2="1157" y2="425" stroke="#0284c7" stroke-width="1.8"/>
+  <rect x="1149" y="425" width="16" height="32" fill="#ffffff" stroke="#0f172a" stroke-width="1.6"/>
+  <text x="1142" y="445" fill="#0f172a" font-size="9.5" font-weight="bold" text-anchor="end">R13 22k</text>
+  <line x1="1157" y1="457" x2="1157" y2="495" stroke="#0284c7" stroke-width="1.8"/>
+  <circle cx="1157" cy="476" r="3.5" fill="#0284c7"/>
+  <line x1="1157" y1="476" x2="1105" y2="476" stroke="#0284c7" stroke-width="1.8"/>
+  <polygon points="995,464 1092,464 1105,476 1092,488 995,488" fill="#ffffff" stroke="#0284c7" stroke-width="1.8"/>
+  <text x="1046" y="480" fill="#0369a1" font-size="10" font-weight="bold" text-anchor="middle">ACS712_SENSE</text>
+
+  <rect x="1149" y="495" width="16" height="32" fill="#ffffff" stroke="#0f172a" stroke-width="1.6"/>
+  <text x="1142" y="515" fill="#0f172a" font-size="9.5" font-weight="bold" text-anchor="end">R14 22k</text>
+  <line x1="1157" y1="527" x2="1157" y2="545" stroke="#0f172a" stroke-width="1.6"/>
+  <text x="1157" y="557" fill="#0f172a" font-size="9.5" font-weight="bold" text-anchor="middle">GND (1.25V@0A)</text>
+
+  <!-- M+ (from ACS712 IP-) and M- to M1: MY1016 -->
+  <line x1="1230" y1="231" x2="1272" y2="265" stroke="#dc2626" stroke-width="2.5"/>
+  <line x1="1055" y1="371" x2="1272" y2="335" stroke="#0f172a" stroke-width="2.5"/>
 
   <!-- M1: MY1016 Motor -->
-  <circle cx="1295" cy="306" r="50" fill="#ffffff" stroke="#0f172a" stroke-width="2.5"/>
-  <text x="1295" y="242" fill="#0f172a" font-size="13" font-weight="bold" text-anchor="middle">M1: MY1016</text>
-  <text x="1295" y="302" fill="#0f172a" font-size="12" font-weight="bold" text-anchor="middle">24V 250W</text>
-  <text x="1295" y="322" fill="#334155" font-size="11" text-anchor="middle">2750 RPM</text>
+  <circle cx="1312" cy="300" r="46" fill="#ffffff" stroke="#0f172a" stroke-width="2.5"/>
+  <text x="1312" y="242" fill="#0f172a" font-size="12.5" font-weight="bold" text-anchor="middle">M1: MY1016</text>
+  <text x="1312" y="296" fill="#0f172a" font-size="11.5" font-weight="bold" text-anchor="middle">24V 250W</text>
+  <text x="1312" y="314" fill="#334155" font-size="10.5" text-anchor="middle">2750 RPM</text>
+  <text x="1312" y="365" fill="#166534" font-size="9.5" font-weight="bold" text-anchor="middle">[ENC1 on Shaft]</text>
 
-  <!-- Coupling to GBX1 (1:52 Gearbox) -->
-  <line x1="1345" y1="306" x2="1390" y2="306" stroke="#475569" stroke-width="3" stroke-dasharray="6,3"/>
-  <rect x="1390" y="256" width="135" height="100" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
-  <text x="1457" y="242" fill="#0f172a" font-size="13" font-weight="bold" text-anchor="middle">GBX1</text>
-  <text x="1457" y="298" fill="#0f172a" font-size="12" font-weight="bold" text-anchor="middle">1:52 Gearbox</text>
-  <text x="1457" y="320" fill="#334155" font-size="11" text-anchor="middle">Output Shaft</text>
+  <!-- Coupling to GBX1 (1:52 Gearbox, η=85%, 60/100 N·m) -->
+  <line x1="1358" y1="300" x2="1395" y2="300" stroke="#475569" stroke-width="3" stroke-dasharray="6,3"/>
+  <rect x="1395" y="242" width="145" height="116" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="1467" y="228" fill="#0f172a" font-size="12.5" font-weight="bold" text-anchor="middle">GBX1: 1:52 (85%)</text>
+  <text x="1467" y="268" fill="#0f172a" font-size="10.5" font-weight="bold" text-anchor="middle">Rated: 60 N.m</text>
+  <text x="1467" y="286" fill="#dc2626" font-size="10.5" font-weight="bold" text-anchor="middle">Max: 100 N.m</text>
+  <text x="1467" y="304" fill="#334155" font-size="9.5" text-anchor="middle">Lash &lt;=50 arcmin</text>
+  <text x="1467" y="322" fill="#334155" font-size="9.5" text-anchor="middle">In &lt;=3000 RPM</text>
+  <text x="1467" y="342" fill="#0369a1" font-size="9.5" font-weight="bold" text-anchor="middle">d_off=8-10cm, L=30cm</text>
 
-  <line x1="1457" y1="356" x2="1457" y2="415" stroke="#0f172a" stroke-width="3"/>
-  <rect x="1385" y="415" width="145" height="50" fill="#ffffff" stroke="#0f172a" stroke-width="1.8"/>
-  <text x="1457" y="438" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">STOP1: Hard Stop</text>
-  <text x="1457" y="454" fill="#475569" font-size="10" text-anchor="middle">(Zero Reference)</text>
+  <line x1="1467" y1="358" x2="1467" y2="415" stroke="#0f172a" stroke-width="3"/>
+  <rect x="1395" y="415" width="145" height="50" fill="#ffffff" stroke="#0f172a" stroke-width="1.8"/>
+  <text x="1467" y="438" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">STOP1: Hard Stop</text>
+  <text x="1467" y="454" fill="#475569" font-size="10" text-anchor="middle">(Homing Datum)</text>
 
   <!-- ===================================================================== -->
-  <!-- 3. 360 PPR OPTICAL ENCODER (ENC1) & LEVEL SHIFTER (BOTTOM LEFT)       -->
+  <!-- 3. 360 PPR NPN OPEN-COLLECTOR ENCODER (ENC1 ON MOTOR SHAFT) (BOT LEFT)-->
   <!-- ===================================================================== -->
+  <text x="75" y="602" fill="#334155" font-size="13" font-weight="bold">3. Top-Hub Motor-Shaft Optical Encoder (NPN Open-Collector, 74,880 CPR)</text>
+
   <polygon points="75,688 185,688 200,700 185,712 75,712" fill="#ffffff" stroke="#d97706" stroke-width="2"/>
   <text x="132" y="704" fill="#b45309" font-size="11" font-weight="bold" text-anchor="middle">+5V_BUCK</text>
   <line x1="200" y1="700" x2="240" y2="700" stroke="#d97706" stroke-width="2"/>
 
   <!-- ENC1 Box -->
-  <rect x="240" y="645" width="190" height="210" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
-  <text x="335" y="630" fill="#0f172a" font-size="14" font-weight="bold" text-anchor="middle">ENC1: 360 PPR</text>
+  <rect x="240" y="645" width="205" height="210" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="342" y="630" fill="#0f172a" font-size="13.5" font-weight="bold" text-anchor="middle">ENC1: 360 PPR (NPN)</text>
 
-  <text x="255" y="704" fill="#b45309" font-size="11" font-weight="bold">VCC (5V)</text>
-  <text x="255" y="825" fill="#0f172a" font-size="11" font-weight="bold">GND</text>
-  <text x="418" y="724" fill="#166534" font-size="11" font-weight="bold" text-anchor="end">OUT_A</text>
-  <text x="418" y="804" fill="#166534" font-size="11" font-weight="bold" text-anchor="end">OUT_B</text>
+  <text x="252" y="704" fill="#b45309" font-size="11" font-weight="bold">VCC (5V Red)</text>
+  <text x="252" y="825" fill="#0f172a" font-size="11" font-weight="bold">GND (Blk+Shld)</text>
+  <text x="433" y="724" fill="#166534" font-size="11" font-weight="bold" text-anchor="end">OUT_A (Grn)</text>
+  <text x="433" y="804" fill="#166534" font-size="11" font-weight="bold" text-anchor="end">OUT_B (Wht)</text>
+  <text x="342" y="765" fill="#475569" font-size="9.5" text-anchor="middle">NPN Open-Collector</text>
 
-  <!-- Level Shifter R3, R4 (Phase A) -->
-  <line x1="430" y1="720" x2="460" y2="720" stroke="#15803d" stroke-width="2"/>
-  <rect x="460" y="712" width="52" height="16" fill="#ffffff" stroke="#0f172a" stroke-width="1.8"/>
-  <text x="486" y="705" fill="#0f172a" font-size="10" font-weight="bold" text-anchor="middle">R3 2.2k</text>
-  <line x1="512" y1="720" x2="605" y2="720" stroke="#15803d" stroke-width="2"/>
-  <circle cx="535" cy="720" r="3.5" fill="#15803d"/>
-  <line x1="535" y1="720" x2="535" y2="736" stroke="#0f172a" stroke-width="1.8"/>
-  <rect x="527" y="736" width="16" height="32" fill="#ffffff" stroke="#0f172a" stroke-width="1.8"/>
-  <text x="549" y="756" fill="#0f172a" font-size="10" font-weight="bold">R4 3.3k</text>
-  <line x1="535" y1="768" x2="535" y2="885" stroke="#0f172a" stroke-width="1.8"/>
-  <circle cx="535" cy="885" r="3.5" fill="#0f172a"/>
+  <!-- Series Damping Resistor R3 (80 Ohm) on Phase A (NO GND Divider!) -->
+  <line x1="445" y1="720" x2="480" y2="720" stroke="#15803d" stroke-width="2"/>
+  <rect x="480" y="712" width="56" height="16" fill="#ffffff" stroke="#0f172a" stroke-width="1.8"/>
+  <text x="508" y="705" fill="#0f172a" font-size="10" font-weight="bold" text-anchor="middle">R3 80Ohm</text>
+  <line x1="536" y1="720" x2="605" y2="720" stroke="#15803d" stroke-width="2"/>
 
   <polygon points="605,708 730,708 745,720 730,732 605,732" fill="#ffffff" stroke="#15803d" stroke-width="2"/>
   <text x="670" y="724" fill="#166534" font-size="11" font-weight="bold" text-anchor="middle">ENC1_CHA_3V3</text>
 
-  <!-- Level Shifter R5, R6 (Phase B) -->
-  <line x1="430" y1="800" x2="460" y2="800" stroke="#15803d" stroke-width="2"/>
-  <rect x="460" y="792" width="52" height="16" fill="#ffffff" stroke="#0f172a" stroke-width="1.8"/>
-  <text x="486" y="785" fill="#0f172a" font-size="10" font-weight="bold" text-anchor="middle">R5 2.2k</text>
-  <line x1="512" y1="800" x2="605" y2="800" stroke="#15803d" stroke-width="2"/>
-  <circle cx="580" cy="800" r="3.5" fill="#15803d"/>
-  <line x1="580" y1="800" x2="580" y2="816" stroke="#0f172a" stroke-width="1.8"/>
-  <rect x="572" y="816" width="16" height="32" fill="#ffffff" stroke="#0f172a" stroke-width="1.8"/>
-  <text x="594" y="836" fill="#0f172a" font-size="10" font-weight="bold">R6 3.3k</text>
-  <line x1="580" y1="848" x2="580" y2="885" stroke="#0f172a" stroke-width="1.8"/>
-  <circle cx="580" cy="885" r="3.5" fill="#0f172a"/>
+  <!-- Series Damping Resistor R5 (80 Ohm) on Phase B (NO GND Divider!) -->
+  <line x1="445" y1="800" x2="480" y2="800" stroke="#15803d" stroke-width="2"/>
+  <rect x="480" y="792" width="56" height="16" fill="#ffffff" stroke="#0f172a" stroke-width="1.8"/>
+  <text x="508" y="785" fill="#0f172a" font-size="10" font-weight="bold" text-anchor="middle">R5 80Ohm</text>
+  <line x1="536" y1="800" x2="605" y2="800" stroke="#15803d" stroke-width="2"/>
 
   <polygon points="605,788 730,788 745,800 730,812 605,812" fill="#ffffff" stroke="#15803d" stroke-width="2"/>
   <text x="670" y="804" fill="#166534" font-size="11" font-weight="bold" text-anchor="middle">ENC1_CHB_3V3</text>
@@ -159,75 +202,87 @@
   <line x1="205" y1="821" x2="205" y2="885" stroke="#0f172a" stroke-width="2"/>
   <line x1="205" y1="885" x2="605" y2="885" stroke="#0f172a" stroke-width="2"/>
   <polygon points="605,873 730,873 745,885 730,897 605,897" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
-  <text x="670" y="889" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">GND</text>
+  <text x="670" y="889" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">GND (STAR)</text>
+
+  <text x="410" y="925" fill="#b91c1c" font-size="10.5" font-weight="bold" text-anchor="middle">*NPN Open-Collector: NO Resistor to GND! Pulled to +3.3V via U2 INPUT_PULLUP*</text>
+  <text x="410" y="945" fill="#475569" font-size="10" text-anchor="middle">(Shield Braid Floating at ENC1 Body; Bonded to U2 GND Only)</text>
 
   <!-- ===================================================================== -->
-  <!-- 4. BRAKE CHOPPER (U202 + R1||R2) & BUS LEVEL SHIFTER (BOTTOM RIGHT)   -->
+  <!-- 4. SERIES BRAKE CHOPPER (R1||R2 -> 2-SCREW MOSFET U202) & VBUS SENSE  -->
   <!-- ===================================================================== -->
-  <polygon points="810,638 915,638 930,650 915,662 810,662" fill="#ffffff" stroke="#dc2626" stroke-width="2"/>
-  <text x="865" y="654" fill="#b91c1c" font-size="11" font-weight="bold" text-anchor="middle">+24V_BUS</text>
-  <line x1="930" y1="650" x2="1120" y2="650" stroke="#dc2626" stroke-width="2"/>
+  <text x="805" y="602" fill="#334155" font-size="13" font-weight="bold">4. VBUS Divider (3x220k|| / 4.6k) &amp; Series Brake Chopper (R1||R2 -&gt; U202)</text>
 
-  <!-- R11 (100k) & R12 (10k) Bus Level Shifter -->
+  <polygon points="805,638 910,638 925,650 910,662 805,662" fill="#ffffff" stroke="#dc2626" stroke-width="2"/>
+  <text x="860" y="654" fill="#b91c1c" font-size="11" font-weight="bold" text-anchor="middle">+24V_BUS</text>
+  <line x1="925" y1="650" x2="1455" y2="650" stroke="#dc2626" stroke-width="2.5"/>
+
+  <!-- R11 (3x 220k in Parallel = 73.3k) & R12 (4.6k) Bus Level Shifter -->
   <circle cx="960" cy="650" r="4" fill="#dc2626"/>
   <line x1="960" y1="650" x2="960" y2="680" stroke="#0f172a" stroke-width="1.8"/>
-  <rect x="952" y="680" width="16" height="42" fill="#ffffff" stroke="#0f172a" stroke-width="1.8"/>
-  <text x="944" y="705" fill="#0f172a" font-size="10" font-weight="bold" text-anchor="end">R11 100k</text>
-  <line x1="960" y1="722" x2="960" y2="775" stroke="#0f172a" stroke-width="1.8"/>
+  <rect x="950" y="680" width="20" height="44" fill="#ffffff" stroke="#0f172a" stroke-width="1.8"/>
+  <text x="942" y="698" fill="#0f172a" font-size="10" font-weight="bold" text-anchor="end">R11 (3x220k||)</text>
+  <text x="942" y="713" fill="#475569" font-size="9.5" text-anchor="end">= 73.33kOhm</text>
+  <line x1="960" y1="724" x2="960" y2="775" stroke="#0f172a" stroke-width="1.8"/>
   <circle cx="960" cy="748" r="3.5" fill="#d97706"/>
   <line x1="960" y1="748" x2="905" y2="748" stroke="#d97706" stroke-width="2"/>
-  <polygon points="805,736 892,736 905,748 892,760 805,760" fill="#ffffff" stroke="#d97706" stroke-width="1.8"/>
-  <text x="850" y="752" fill="#b45309" font-size="10" font-weight="bold" text-anchor="middle">VBUS_SENSE</text>
+  <polygon points="800,736 892,736 905,748 892,760 800,760" fill="#ffffff" stroke="#d97706" stroke-width="1.8"/>
+  <text x="848" y="752" fill="#b45309" font-size="10" font-weight="bold" text-anchor="middle">VBUS_SENSE</text>
+  <text x="848" y="775" fill="#475569" font-size="9.5" text-anchor="middle">(1.42V @ 24V)</text>
 
-  <rect x="952" y="775" width="16" height="42" fill="#ffffff" stroke="#0f172a" stroke-width="1.8"/>
-  <text x="944" y="800" fill="#0f172a" font-size="10" font-weight="bold" text-anchor="end">R12 10k</text>
-  <line x1="960" y1="817" x2="960" y2="885" stroke="#0f172a" stroke-width="1.8"/>
-  <circle cx="960" cy="885" r="3.5" fill="#0f172a"/>
+  <rect x="950" y="775" width="20" height="42" fill="#ffffff" stroke="#0f172a" stroke-width="1.8"/>
+  <text x="942" y="800" fill="#0f172a" font-size="10" font-weight="bold" text-anchor="end">R12 4.6kOhm</text>
+  <line x1="960" y1="817" x2="960" y2="915" stroke="#0f172a" stroke-width="1.8"/>
+  <circle cx="960" cy="915" r="3.5" fill="#0f172a"/>
 
-  <polygon points="995,736 1090,736 1102,748 1090,760 995,760" fill="#ffffff" stroke="#dc2626" stroke-width="2"/>
-  <text x="1045" y="752" fill="#b91c1c" font-size="10" font-weight="bold" text-anchor="middle">CHOP_PWM</text>
-  <line x1="1102" y1="748" x2="1120" y2="748" stroke="#dc2626" stroke-width="2"/>
+  <!-- HIGH-SIDE PARALLEL BRAKING RESISTORS R1 (2Ω 100W) || R2 (2Ω 100W) -->
+  <circle cx="1310" cy="650" r="4" fill="#dc2626"/>
+  <circle cx="1455" cy="650" r="4" fill="#dc2626"/>
+  <text x="1255" y="643" fill="#b91c1c" font-size="10" font-weight="bold" text-anchor="end">Lead A (+24V)</text>
 
-  <!-- U202: 30A Heatbed MOSFET Module -->
-  <rect x="1120" y="645" width="185" height="190" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
-  <text x="1212" y="630" fill="#0f172a" font-size="14" font-weight="bold" text-anchor="middle">U202: 30A MOSFET</text>
+  <!-- R1 (2 Ohm 100W) -->
+  <line x1="1310" y1="650" x2="1310" y2="672" stroke="#dc2626" stroke-width="2.2"/>
+  <rect x="1285" y="672" width="50" height="58" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="1310" y="692" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">R1</text>
+  <text x="1310" y="707" fill="#334155" font-size="10" text-anchor="middle">2Ohm</text>
+  <text x="1310" y="721" fill="#334155" font-size="10" text-anchor="middle">100W</text>
+  <line x1="1310" y1="730" x2="1310" y2="752" stroke="#d97706" stroke-width="2.2"/>
 
-  <text x="1132" y="694" fill="#dc2626" font-size="11" font-weight="bold">DC+ (24V)</text>
-  <text x="1132" y="752" fill="#dc2626" font-size="11" font-weight="bold">PWM</text>
-  <text x="1132" y="810" fill="#0f172a" font-size="11" font-weight="bold">GND</text>
-  <text x="1292" y="704" fill="#dc2626" font-size="11" font-weight="bold" text-anchor="end">OUT+</text>
-  <text x="1292" y="804" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="end">OUT-</text>
+  <!-- R2 (2 Ohm 100W) -->
+  <line x1="1455" y1="650" x2="1455" y2="672" stroke="#dc2626" stroke-width="2.2"/>
+  <rect x="1430" y="672" width="50" height="58" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="1455" y="692" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">R2</text>
+  <text x="1455" y="707" fill="#334155" font-size="10" text-anchor="middle">2Ohm</text>
+  <text x="1455" y="721" fill="#334155" font-size="10" text-anchor="middle">100W</text>
+  <line x1="1455" y1="730" x2="1455" y2="752" stroke="#d97706" stroke-width="2.2"/>
 
-  <line x1="1120" y1="690" x2="1095" y2="690" stroke="#dc2626" stroke-width="2"/>
-  <line x1="1095" y1="690" x2="1095" y2="650" stroke="#dc2626" stroke-width="2"/>
-  <circle cx="1095" cy="650" r="4" fill="#dc2626"/>
+  <!-- Lead B (Joined Bottom of R1 || R2 = 1.0 Ohm 200W) into U202 Power+ (Drain) -->
+  <line x1="1310" y1="752" x2="1455" y2="752" stroke="#d97706" stroke-width="2.5"/>
+  <circle cx="1382" cy="752" r="4" fill="#d97706"/>
+  <text x="1394" y="770" fill="#b45309" font-size="10" font-weight="bold">Lead B (R_eq=1.0Ohm)</text>
+  <line x1="1382" y1="752" x2="1382" y2="780" stroke="#d97706" stroke-width="2.5"/>
 
-  <line x1="1120" y1="806" x2="1070" y2="806" stroke="#0f172a" stroke-width="2"/>
-  <line x1="1070" y1="806" x2="1070" y2="885" stroke="#0f172a" stroke-width="2"/>
-  <circle cx="1070" cy="885" r="3.5" fill="#0f172a"/>
-  <line x1="905" y1="885" x2="1120" y2="885" stroke="#0f172a" stroke-width="2"/>
-  <polygon points="805,873 892,873 905,885 892,897 805,897" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
-  <text x="850" y="889" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">GND</text>
+  <!-- U202: 2-Screw-Terminal 30A Heatbed MOSFET Switch -->
+  <rect x="1220" y="780" width="265" height="110" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="1382" y="798" fill="#b45309" font-size="10.5" font-weight="bold" text-anchor="middle">Power + Screw (Drain)</text>
+  <text x="1375" y="845" fill="#0f172a" font-size="12" font-weight="bold" text-anchor="middle">U202: 30A MOSFET (2-Screw)</text>
+  <text x="1382" y="882" fill="#0f172a" font-size="10.5" font-weight="bold" text-anchor="middle">Power - Screw (Source)</text>
+  <text x="1232" y="832" fill="#dc2626" font-size="10.5" font-weight="bold">Control +</text>
+  <text x="1232" y="868" fill="#0f172a" font-size="10.5" font-weight="bold">Control -</text>
 
-  <!-- Parallel Braking Resistors R1 & R2 -->
-  <line x1="1305" y1="700" x2="1485" y2="700" stroke="#dc2626" stroke-width="2"/>
-  <line x1="1305" y1="800" x2="1485" y2="800" stroke="#0f172a" stroke-width="2"/>
+  <!-- CHOP_PWM into Control + -->
+  <polygon points="1030,816 1125,816 1138,828 1125,840 1030,840" fill="#ffffff" stroke="#dc2626" stroke-width="2"/>
+  <text x="1080" y="832" fill="#b91c1c" font-size="10" font-weight="bold" text-anchor="middle">CHOP_PWM</text>
+  <line x1="1138" y1="828" x2="1220" y2="828" stroke="#dc2626" stroke-width="2"/>
 
-  <circle cx="1375" cy="700" r="4" fill="#dc2626"/>
-  <circle cx="1375" cy="800" r="4" fill="#0f172a"/>
-  <line x1="1375" y1="700" x2="1375" y2="720" stroke="#0f172a" stroke-width="2"/>
-  <rect x="1353" y="720" width="44" height="60" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
-  <text x="1375" y="742" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">R1</text>
-  <text x="1375" y="758" fill="#334155" font-size="10" text-anchor="middle">2Ohm</text>
-  <text x="1375" y="772" fill="#334155" font-size="10" text-anchor="middle">100W</text>
-  <line x1="1375" y1="780" x2="1375" y2="800" stroke="#0f172a" stroke-width="2"/>
+  <!-- Control - and Power - (Source) to STAR_GND -->
+  <line x1="1220" y1="864" x2="1175" y2="864" stroke="#0f172a" stroke-width="1.8"/>
+  <line x1="1175" y1="864" x2="1175" y2="915" stroke="#0f172a" stroke-width="1.8"/>
+  <circle cx="1175" cy="915" r="3.5" fill="#0f172a"/>
 
-  <circle cx="1465" cy="700" r="4" fill="#dc2626"/>
-  <circle cx="1465" cy="800" r="4" fill="#0f172a"/>
-  <line x1="1465" y1="700" x2="1465" y2="720" stroke="#0f172a" stroke-width="2"/>
-  <rect x="1443" y="720" width="44" height="60" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
-  <text x="1465" y="742" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">R2</text>
-  <text x="1465" y="758" fill="#334155" font-size="10" text-anchor="middle">2Ohm</text>
-  <text x="1465" y="772" fill="#334155" font-size="10" text-anchor="middle">100W</text>
-  <line x1="1465" y1="780" x2="1465" y2="800" stroke="#0f172a" stroke-width="2"/>
+  <line x1="1382" y1="890" x2="1382" y2="915" stroke="#0f172a" stroke-width="2.5"/>
+  <circle cx="1382" cy="915" r="4" fill="#0f172a"/>
+
+  <line x1="905" y1="915" x2="1450" y2="915" stroke="#0f172a" stroke-width="2.5"/>
+  <polygon points="800,903 892,903 905,915 892,927 800,927" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+  <text x="848" y="919" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">GND (STAR)</text>
 </svg>
