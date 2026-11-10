@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#171715" />
+  <title>Cycling Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="dashboard" id="dashboard">
+    <!-- Scene-specific video URLs are configured in app.js. Keep videos muted for mobile autoplay. -->
+    <video id="backgroundVideo" class="background-video"
+       autoplay muted loop playsinline></video>
+
+    <iframe id="youtubeBackground"
+            class="youtube-background"
+            allow="autoplay; encrypted-media; picture-in-picture"
+            frameborder="0">
+    </iframe>
+    <div class="video-fallback" aria-hidden="true"></div>
+    <div class="scrim"></div>
+    <button class="video-play-button" id="videoPlayButton" type="button" hidden>Tap to play video</button>
+
+    <header class="topbar">
+      <button class="menu-button glass" aria-label="Open menu" id="menuButton" type="button">
+        <span></span><span></span><span></span>
+      </button>
+      <div class="status">
+        <div class="time-block"><span>Time</span><strong id="clock">10:14 AM</strong></div>
+        <div class="battery" aria-label="Battery"><i></i></div>
+        <span class="battery-percent">78%</span>
+        <svg class="bluetooth" viewBox="0 0 24 24" aria-label="Bluetooth" role="img"><path d="M7 7l10 10-5 5V2l5 5L7 17" /></svg>
+      </div>
+    </header>
+
+    <div class="scene-label">POV: <span id="sceneName">COASTAL FOREST</span></div>
+
+    <section class="metrics" aria-label="Live cycling metrics">
+      <div class="side-metric">
+        <div class="small-dial">
+          <svg class="dial-svg small-dial-svg" viewBox="0 0 120 100" aria-hidden="true">
+            <g id="rpmTicks" class="dial-ticks"></g>
+            <path class="dial-track" d="M28.887 81.113 A44 44 0 1 1 91.113 81.113" pathLength="1000" />
+            <path class="dial-progress" id="rpmProgress" d="M28.887 81.113 A44 44 0 1 1 91.113 81.113" pathLength="1000" />
+          </svg>
+          <div class="small-readout"><strong id="rpmValue">78</strong><small>RPM</small></div>
+        </div>
+        <div class="metric-caption">RPM</div>
+      </div>
+
+      <div class="speed-metric">
+        <div class="speed-dial">
+          <svg class="dial-svg speed-dial-svg" viewBox="0 0 220 190" aria-hidden="true">
+            <defs>
+              <linearGradient id="speedArcGradient" x1="0" y1="1" x2="1" y2="0">
+                <stop offset="0" stop-color="#c9c9c3" />
+                <stop offset=".55" stop-color="#ffffff" />
+                <stop offset="1" stop-color="#d8f5f2" />
+              </linearGradient>
+            </defs>
+            <g id="speedTicks" class="dial-ticks speed-ticks"></g>
+            <path class="dial-track speed-track" d="M49.19 156.81 A86 86 0 1 1 170.81 156.81" pathLength="1000" />
+            <path class="dial-progress speed-progress" id="speedProgress" d="M49.19 156.81 A86 86 0 1 1 170.81 156.81" pathLength="1000" />
+          </svg>
+          <div class="speed-readout">
+            <span class="gauge-top">20</span>
+            <strong id="speedValue">24.5</strong>
+            <span class="speed-unit">km/h</span>
+            <span class="gauge-min">0</span><span class="gauge-max">40</span>
+          </div>
+        </div>
+        <div class="metric-caption speed-caption">SPEED</div>
+      </div>
+
+      <div class="side-metric">
+        <div class="small-dial">
+          <svg class="dial-svg small-dial-svg" viewBox="0 0 120 100" aria-hidden="true">
+            <g id="torqueTicks" class="dial-ticks"></g>
+            <path class="dial-track" d="M28.887 81.113 A44 44 0 1 1 91.113 81.113" pathLength="1000" />
+            <path class="dial-progress" id="torqueProgress" d="M28.887 81.113 A44 44 0 1 1 91.113 81.113" pathLength="1000" />
+          </svg>
+          <div class="small-readout"><strong id="torqueValue">112</strong><small>Nm</small></div>
+        </div>
+        <div class="metric-caption">TORQUE</div>
+      </div>
+    </section>
+
+    <nav class="scene-nav glass" aria-label="Scenery selection">
+      <div class="nav-handle"></div>
+      <button class="scene-option active" type="button" data-scene="forest" data-label="COASTAL FOREST" aria-pressed="true">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 25h18M10 24V9l5-5 5 5v15M8 14h14M12 9h6M23 24V13l4-4 3 4v11M23 18h7" /></svg>
+        <span>Forest</span>
+      </button>
+      <button class="scene-option" type="button" data-scene="beach" data-label="BEACH" aria-pressed="false">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 23c4-4 8-4 12 0s8 4 12 0M5 27h22M16 5v12m0-12c-5 2-7 6-7 10 4 0 7-3 7-10zm0 0c5 2 7 6 7 10-4 0-7-3-7-10z" /></svg>
+        <span>Beach</span>
+      </button>
+      <button class="scene-option" type="button" data-scene="nightCity" data-label="NIGHT CITY" aria-pressed="false">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M22 5a11 11 0 1 0 6 18A12 12 0 0 1 22 5zM8 7v5M5.5 9.5h5M22 25v-5m-2.5 2.5h5" /></svg>
+        <span>Night City</span>
+      </button>
+      <button class="scene-option" type="button" data-scene="mountains" data-label="MOUNTAINS" aria-pressed="false">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M3 25 12 9l5 8 4-6 8 14H3zM9 14l3 3 3-3M18 18l3 3 2-3" /></svg>
+        <span>Mountains</span>
+      </button>
+    </nav>
+
+    <div class="menu-panel glass" id="menuPanel">
+      <strong>Ride controls</strong>
+      <button id="demoToggle" type="button">Pause demo data</button>
+      <button id="fullscreenButton" type="button">Enter fullscreen</button>
+      <p>Connect your ESP32 WebSocket in <code>app.js</code>.</p>
+    </div>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
