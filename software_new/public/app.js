@@ -1,8 +1,11 @@
+import { createExerciseUI } from './exercise.js'
+
 const root = document.querySelector('#app')
 const state = {
   view: 'welcome', name: '', email: '', password: '', otp: ['', '', '', ''],
   user: null, busy: false, message: '', info: false, menu: false,
-  connection: '', connectionError: false, connected: false, progress: []
+  connection: '', connectionError: false, connected: false, connectionMode: 'none',
+  progress: [], progressError: ''
 }
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[character]))
 
@@ -18,15 +21,24 @@ async function api(path, options = {}) {
   return data
 }
 function navigate(path) {
+  if (location.pathname === '/device' && path !== '/device') exercises.reset()
   history.pushState({}, '', path)
   state.menu = false
   state.message = ''
   render()
-  if (path === '/progress' && state.user) {
-    api('/progress').then(result => { state.progress = result.sessions; if(location.pathname === '/progress')render() }).catch(()=>{})
-  }
+  if ((path === '/progress' || path === '/device') && state.user) void loadProgress()
   scrollTo({ top: 0, behavior: 'instant' })
 }
+async function loadProgress() {
+  if (!state.user) return
+  try {
+    const result = await api('/progress')
+    state.progress = result.sessions
+    state.progressError = ''
+  } catch (error) { state.progressError = error.message || 'Could not load sessions.' }
+  if (['/device', '/progress'].includes(location.pathname)) render()
+}
+const exercises = createExerciseUI({ state, api, render, navigate, escapeHtml, loadProgress })
 function alertMarkup() {
   return state.message ? `<p class="auth-alert ${state.info ? 'info' : ''}" role="status">${escapeHtml(state.message)}</p>` : ''
 }
@@ -82,16 +94,30 @@ function dashboard() {
   return `${header()}<main class="dashboard-main"><h1 class="hero-title">Knee Rehabilitation</h1>
     <div class="hero-art"><div class="sage-band"></div><div class="photo-frame"><img src="/assets/rehabilitation.jpg" alt="Person receiving support during knee rehabilitation" /></div></div>
     <section class="hero-bottom"><div class="micro-label">DOULA: Knee Rehabilitation</div><h2>Start exercising</h2><p>Check if the rehabilitation device is connected</p>
-      <button class="connect-btn" id="connect-btn" type="button" ${state.busy?'disabled':''}>${state.busy?'Checking…':'Connect Device'}</button>
+      <div class="dashboard-connection-actions"><button class="connect-btn" id="connect-btn" type="button" ${state.busy?'disabled':''}>${state.busy?'Checking…':'Connect Device'}</button><button class="demo-btn" id="demo-btn" type="button">Try without ESP32 ↗</button></div>
+      <p class="demo-caption">Demo opens the exercise interface with a simulated repetition counter.</p>
       ${state.connection?`<p class="connect-status ${state.connectionError?'error':''}" role="status">${escapeHtml(state.connection)}</p>`:''}
     </section></main>`
 }
+function progressPage() {
+  const sessions = state.progress
+  const totalReps = sessions.reduce((sum, row) => sum + Number(row.reps || 0), 0)
+  const modes = new Set(sessions.map(row => row.type)).size
+  const rows = sessions.map(row => {
+    const day = new Date(row.date)
+    const date = Number.isNaN(day.getTime()) ? escapeHtml(row.date || '') : escapeHtml(day.toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }))
+    return `<tr><td>${date}</td><td><strong>${escapeHtml(row.type)}</strong></td><td>${Number(row.reps)}</td><td><span class="trial-chip">${row.source === 'demo' ? 'Demo' : 'Connected preview'}</span></td></tr>`
+  }).join('')
+  return `${header()}<main class="inner-page progress-page"><div class="inner-eyebrow">DOULA: Rehabilitation records</div><h1 class="inner-title">Track Progress</h1><p class="inner-description">Your completed exercise trials, saved to your account on this computer. These counts are simulated by the interface, not measured by the ESP32.</p>
+    <section class="progress-summary"><article><span>Sessions completed</span><strong>${sessions.length}</strong></article><article><span>Simulated repetitions</span><strong>${totalReps}</strong></article><article><span>Exercise types tried</span><strong>${modes}</strong></article></section>
+    <section class="surface-panel"><h2>Previous exercises</h2>${state.progressError ? `<p class="progress-error" role="alert">${escapeHtml(state.progressError)}</p>` : ''}${sessions.length ? `<div class="progress-table-wrap"><table class="simple-table"><thead><tr><th>Date & time</th><th>Exercise</th><th>Reps</th><th>Mode</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p>No sessions recorded yet. Try the exercise interface in Demo mode to create your first entry.</p>'}</section><a class="inline-link" href="/dashboard" data-link>← Back to home</a></main>`
+}
 function extraPage() {
   const path = location.pathname
-  if (path === '/progress') return `${header()}<main class="inner-page"><div class="inner-eyebrow">DOULA: Rehabilitation records</div><h1 class="inner-title">Track Progress</h1><p class="inner-description">Your previous rehabilitation sessions will appear here once DOULA starts recording them.</p><section class="surface-panel"><h2>${state.progress.length?'Previous sessions':'No sessions recorded yet.'}</h2>${state.progress.length?`<table class="simple-table"><thead><tr><th>Date</th><th>Session</th></tr></thead><tbody>${state.progress.map((s,i)=>`<tr><td>${escapeHtml(s.date || '')}</td><td>${escapeHtml(s.label || 'Session '+(i+1))}</td></tr>`).join('')}</tbody></table>`:'<p>Complete a session with the device to start building your history.</p>'}</section><a href="/dashboard" class="inline-link" data-link>← Back to home</a></main>`
+  if (path === '/progress') return progressPage()
   if (path === '/how-to') return `${header()}<main class="inner-page"><div class="inner-eyebrow">DOULA: Guide</div><h1 class="inner-title">How-to</h1><p class="inner-description">A place for your DOULA device instructions and documents.</p><section class="surface-panel"><h2>Device guide</h2><p>The operating instructions will be added when the device workflow is finalized. Please use the device only with appropriate supervision.</p></section><a href="/dashboard" class="inline-link" data-link>← Back to home</a></main>`
   if (path === '/about') return `${header()}<main class="inner-page"><div class="inner-eyebrow">Meet DOULA</div><h1 class="inner-title">About Us</h1><p class="inner-description">DOULA is a prototype knee rehabilitation device with ESP32-based controllers.</p><section class="surface-panel"><h2>Our project</h2><p>More information about the DOULA team and the device will be added here.</p></section><a href="/dashboard" class="inline-link" data-link>← Back to home</a></main>`
-  if (path === '/device') return `${header()}<main class="inner-page"><div class="inner-eyebrow">DOULA: Device</div><h1 class="inner-title">Device connection</h1><p class="inner-description">${state.connected ? 'The ESP32 coordinator responded to the connection check. This page will contain your exercise and monitoring controls once we have the device protocol.' : 'Please use Connect Device on the dashboard to check the ESP32.'}</p><div class="surface-panel">${state.connected?'<span class="pill-status">● ESP32 responded</span>':'<h2>Device not checked yet</h2>'}<p style="margin-top:16px">No movement commands or motor controls are sent from this prototype page.</p></div><a href="/dashboard" class="inline-link" data-link>← Back to home</a></main>`
+  if (path === '/device') return state.connectionMode !== 'none' ? exercises.html() : `${header()}<main class="inner-page"><h1 class="inner-title">Exercise interface</h1><p class="inner-description">Go back to the dashboard to check the ESP32 or open Demo mode.</p><a data-link href="/dashboard" class="inline-link">← Back to home</a></main>`
   return dashboard()
 }
 function render() {
@@ -108,6 +134,7 @@ async function withPending(task) {
   finally { state.busy=false;render() }
 }
 function attachEvents() {
+  if (state.user && location.pathname === '/device' && state.connectionMode !== 'none') exercises.attach()
   document.querySelector('#go-login')?.addEventListener('click',()=>switchAuth('login'))
   document.querySelector('#go-signup')?.addEventListener('click',()=>switchAuth('signup'))
   document.querySelector('#auth-back')?.addEventListener('click',()=>switchAuth(state.view==='password'?'verify':state.view==='verify'?'signup':'welcome'))
@@ -156,15 +183,18 @@ function attachEvents() {
   document.querySelector('#toggle-menu')?.addEventListener('click',()=>{state.menu=!state.menu;render()})
   document.querySelectorAll('[data-link]').forEach(el=>el.addEventListener('click',e=>{e.preventDefault();navigate(el.getAttribute('href'))}))
   document.querySelectorAll('[data-logout]').forEach(el=>el.addEventListener('click',()=>withPending(async()=>{
-    await api('/auth/logout',{method:'POST'});state.user=null;state.view='login';state.email='';state.password='';state.menu=false;state.connected=false;state.connection='';navigate('/')
+    await api('/auth/logout',{method:'POST'});exercises.reset();state.user=null;state.view='login';state.email='';state.password='';state.menu=false;state.connected=false;state.connectionMode='none';state.connection='';state.progress=[];navigate('/')
   })))
+  document.querySelector('#demo-btn')?.addEventListener('click',()=>{
+    exercises.reset();state.connected=false;state.connectionMode='demo';state.connection='';navigate('/device')
+  })
   document.querySelector('#connect-btn')?.addEventListener('click',()=>withPending(async()=>{
     const result=await api('/device/status')
-    if(result.connected){state.connected=true;state.connection='';navigate('/device')}
+    if(result.connected){exercises.reset();state.connected=true;state.connectionMode='connected';state.connection='';navigate('/device')}
     else{state.connection=result.message;state.connectionError=true}
   }))
 }
-window.addEventListener('popstate',()=>render())
+window.addEventListener('popstate',()=>{if(location.pathname !== '/device')exercises.reset();render();if(location.pathname==='/progress'&&state.user)void loadProgress()})
 ;(async()=>{
   try {
     const result=await api('/me')

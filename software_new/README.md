@@ -1,6 +1,6 @@
-# DOULA — Knee Rehabilitation Website Prototype
+# DOULA — Knee Rehabilitation Website Prototype (Exercise Tracker)
 
-A complete, small, dependency-free Node.js website with the DOULA login and responsive dashboard based on Priyanshi's uploaded Figma screenshots and login-page ZIP.
+A complete, dependency-free Node.js prototype with login, Gmail OTP, dashboard, and the Exercise Mode Tracker interface adapted from Priyanshi's Figma export. The exercise interface runs inside the existing site; there is no separate React/Vite server to launch.
 
 ## 1. Run the website
 
@@ -36,11 +36,17 @@ The backend then emails the OTP using Gmail SMTP. The receiver can use their own
 
 There is no Confirm Password, Forgot Password, or other account-management UI.
 
-## 3. Dashboard and logout
+## 3. Dashboard, exercise modes and logout
 
 - The dashboard matches the white/olive desktop and mobile images in `design-reference/`.
 - **Log Out** ends the current session and returns to the login screen.
-- **Track Progress** shows saved sessions (initially empty, because device telemetry has not been integrated).
+- **Connect Device** checks the configured ESP32 WebSocket endpoint. On success, it opens the Exercise Mode Tracker.
+- **Try without ESP32** always opens the same interface in clearly marked demo mode, even when no hardware is powered on.
+- Select **Flexion–Extension** and then **Support** or **Resistance**, or select **Cycling**.
+- Enter **1–99 repetitions**. Start, pause/resume, and finish the timer-based trial. The cycling mode also embeds the video from the Figma export when internet access allows.
+- When the timed countdown finishes, the backend automatically saves the exercise type, number of repetitions, date/time and trial mode to `backend/data/progress.json`.
+- **Track Progress** displays the saved history for the currently logged-in account, plus a session count and total repetitions. A user only sees their own records.
+- **All counts are simulated** in this prototype. Even after an ESP32 WebSocket responds, the rep countdown is **not** ESP32 telemetry. Saved records are labeled **Demo** or **Connected preview**; neither represents validated physical exercise.
 - **How-to** and **About Us** are simple placeholders awaiting your documents.
 
 ## 4. ESP32 — Connect Device button
@@ -51,25 +57,31 @@ When U1/ESP_MASTER's WebSocket URL is known:
 2. The computer running the backend must be able to reach the ESP32 on the same network.
 3. Restart the server.
 4. Click **Connect Device**. The backend attempts a WebSocket handshake with U1.
-5. If the handshake succeeds, the browser goes to the new device page. If it fails, a message is shown and the dashboard stays open.
+5. If the handshake succeeds, the browser opens the Exercise Mode Tracker. If it fails, the dashboard stays open; you can still click **Try without ESP32**.
 
 A successful handshake only means the ESP32 WebSocket endpoint responded; it does not prove that every sensor or mechanical subsystem is healthy. A proper heartbeat/health response can be added once firmware protocol is shared.
 
-The device page currently contains **no commands that move motors**. DOULA's emergency stop and all mechanical motion limits must remain enforced by the hardware/firmware, independent of the browser.
+The exercise interface currently contains **no commands that move motors** or alter ESP32 control loops. DOULA's emergency stop and all mechanical motion limits must remain enforced by hardware/firmware, independent of the browser. Real device-based repetition counts and actuation require a separately specified, tested ESP32 protocol.
 
 ## 5. Folder guide
 
 - `public/index.html`: HTML entry point
 - `public/styles.css`: responsive DOULA styles
 - `public/app.js`: frontend logic, navigation, and form interactions
+- `public/exercise.js`: integrated Figma exercise-mode UI, timer simulation, and session saving
+- `public/exercise.css`: visual styles for the exercise-mode UI, adapted to the dashboard
 - `public/assets/rehabilitation.jpg`: rehabilitation image cropped from the supplied Figma screenshot
 - `server.mjs`: web server and API routes
-- `backend/core.mjs`: users, four-digit OTP validation, password hashing, sessions
+- `backend/core.mjs`: users, four-digit OTP validation, password hashing, login sessions, and saved exercise records
 - `backend/email.mjs`: Gmail SMTP sender
-- `backend/data/`: stores users locally (created on first signup; never share users.json)
+- `backend/data/`: stores users and exercise history locally (created when needed; never share users.json or progress.json)
 - `design-reference/`: the user-provided dashboard screenshots and assets
 - `tests/`: basic backend tests
 
 ## Notes
 
-This is for a **local prototype**, not an internet-exposed clinical service. User records are stored locally as JSON. OTP requests and active sessions are held in memory, so restarting the server during a signup resets the in-progress OTP; registered users remain saved. Passwords are hashed with `scrypt` and cookie sessions are HTTP-only. A public deployment would need additional protections and secure HTTPS configuration.
+This is for a **local prototype**, not an internet-exposed clinical service. User and exercise records are stored locally as JSON. OTP requests and login sessions are held in memory, so restarting the server during signup resets the in-progress OTP; registered accounts and saved session history remain available. Passwords are hashed with `scrypt` and cookie sessions are HTTP-only. A public deployment would need additional protections, appropriate safeguards for rehabilitation records, and secure HTTPS configuration.
+
+## 6. Updating the team GitHub repository
+
+In your cloned `DP_DULLA` repository, replace **the contents of `software_new/`** with the contents of this `DOULA_Website/` folder (do not delete the unrelated sibling `software/` folder). Use GitHub Desktop to review the files, commit your changes, push the branch, and create a Pull Request. Do not commit `.env`, `backend/data/users.json`, or `backend/data/progress.json`.

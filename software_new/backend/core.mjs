@@ -17,6 +17,8 @@ export class AuthStore {
     this.signups = new Map()
     this.verified = new Map()
     this.sessions = new Map()
+    this.progress = []
+    this.progressWrite = Promise.resolve()
   }
 
   async init() {
@@ -93,7 +95,40 @@ export class AuthStore {
   }
 
   logout(token) { this.sessions.delete(token) }
-  getProgress(userId) { return this.progress.filter(row => row.userId === userId) }
+  getProgress(userId) { return this.progress.filter(row => row.userId === userId).map(({ userId: _id, ...row }) => row) }
+
+  async addProgress(userId, details) {
+    if (!this.users.some(user => user.id === userId)) throw new Error('Please log in first.')
+    const type = String(details?.type || '')
+    const reps = Number(details?.reps)
+    const source = String(details?.source || '')
+    const durationSeconds = Number(details?.durationSeconds ?? 0)
+    if (!['Support', 'Resistance', 'Cycling'].includes(type)) throw new Error('Select a valid exercise type.')
+    if (!Number.isInteger(reps) || reps < 1 || reps > 99) throw new Error('Repetitions must be between 1 and 99.')
+    if (!['demo', 'connected-preview'].includes(source)) throw new Error('Invalid session mode.')
+    if (!Number.isFinite(durationSeconds) || durationSeconds < 0 || durationSeconds > 86400) throw new Error('Invalid session duration.')
+
+    const session = {
+      id: randomBytes(12).toString('hex'),
+      userId,
+      type,
+      reps,
+      source,
+      verifiedByDevice: false,
+      durationSeconds: Math.round(durationSeconds),
+      date: new Date().toISOString()
+    }
+    // Serialize file writes so two near-simultaneous sessions cannot overwrite each other.
+    this.progressWrite = this.progressWrite.catch(() => {}).then(async () => {
+      this.progress.unshift(session)
+      const temp = this.progressFile + '.tmp'
+      await writeFile(temp, JSON.stringify(this.progress, null, 2))
+      await rename(temp, this.progressFile)
+    })
+    await this.progressWrite
+    const { userId: _id, ...saved } = session
+    return saved
+  }
 }
 
 export async function hashPassword(password) {

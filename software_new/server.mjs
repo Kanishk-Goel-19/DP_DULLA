@@ -119,11 +119,17 @@ export const server = http.createServer(async (req, res) => {
         if (!user) return json(res, 401, { ok: false, message: 'Please log in.' })
         return json(res, 200, { ok: true, sessions: store.getProgress(user.id) })
       }
+      if (method === 'POST' && pathname === '/api/progress') {
+        const user = loggedIn(req)
+        if (!user) return json(res, 401, { ok: false, message: 'Please log in.' })
+        const saved = await store.addProgress(user.id, await readBody(req))
+        return json(res, 201, { ok: true, session: saved })
+      }
       return json(res, 404, { ok: false, message: 'API route not found.' })
     }
 
     // Serve the single-page website (including refreshes of /dashboard, /progress etc.).
-    const assetPath = pathname.startsWith('/assets/') ? path.join(root, 'public', pathname) : pathname === '/styles.css' || pathname === '/app.js' ? path.join(root, 'public', pathname) : path.join(root, 'public', 'index.html')
+    const assetPath = pathname.startsWith('/assets/') ? path.join(root, 'public', pathname) : ['/styles.css', '/exercise.css', '/app.js', '/exercise.js'].includes(pathname) ? path.join(root, 'public', pathname) : path.join(root, 'public', 'index.html')
     const safeRoot = path.join(root, 'public') + path.sep
     if (!assetPath.startsWith(safeRoot)) return json(res, 404, { ok: false })
     const body = await readFile(assetPath)
