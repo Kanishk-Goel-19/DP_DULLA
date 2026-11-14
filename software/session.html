@@ -4,29 +4,34 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#171715" />
-  <title>Cycling Dashboard</title>
-  <link rel="stylesheet" href="style.css" />
+  <title>DOULA | Cycling Session</title>
+  <link rel="stylesheet" href="session.css" />
 </head>
 <body>
   <main class="dashboard" id="dashboard">
-    <!-- Scene-specific video URLs are configured in app.js. Keep videos muted for mobile autoplay. -->
-    <video id="backgroundVideo" class="background-video"
-       autoplay muted loop playsinline></video>
+    <video id="backgroundVideo" class="background-video" autoplay muted loop playsinline></video>
 
     <iframe id="youtubeBackground"
             class="youtube-background"
             allow="autoplay; encrypted-media; picture-in-picture"
-            frameborder="0">
+            frameborder="0"
+            referrerpolicy="strict-origin-when-cross-origin">
     </iframe>
     <div class="video-fallback" aria-hidden="true"></div>
     <div class="scrim"></div>
     <button class="video-play-button" id="videoPlayButton" type="button" hidden>Tap to play video</button>
 
     <header class="topbar">
-      <button class="menu-button glass" aria-label="Open menu" id="menuButton" type="button">
-        <span></span><span></span><span></span>
-      </button>
+      <div class="topbar-left">
+        <button class="menu-button glass" aria-label="Open menu" id="menuButton" type="button">
+          <span></span><span></span><span></span>
+        </button>
+        <button class="topbar-pill glass" id="pauseResumeBtn" type="button">Pause Session</button>
+        <button class="topbar-pill topbar-pill-end" id="endSessionBtn" type="button">End Session</button>
+        <a class="topbar-pill glass topbar-link" id="seeProgressLink" href="/progress">See Progress ↗</a>
+      </div>
       <div class="status">
+        <span class="status-pill glass" id="rideStatusPill">Demo Ride</span>
         <div class="time-block"><span>Time</span><strong id="clock">10:14 AM</strong></div>
         <div class="battery" aria-label="Battery"><i></i></div>
         <span class="battery-percent">78%</span>
@@ -34,7 +39,13 @@
       </div>
     </header>
 
-    <div class="scene-label">POV: <span id="sceneName">COASTAL FOREST</span></div>
+    <div class="scene-label">
+      POV: <span id="sceneName">COASTAL FOREST</span>
+      <span class="scene-divider">·</span>
+      <span id="rideTimerText">00:00</span>
+      <span class="scene-divider">·</span>
+      <span id="rideRepsText">0 cycles</span>
+    </div>
 
     <section class="metrics" aria-label="Live cycling metrics">
       <div class="side-metric">
@@ -108,11 +119,43 @@
 
     <div class="menu-panel glass" id="menuPanel">
       <strong>Ride controls</strong>
-      <button id="demoToggle" type="button">Pause demo data</button>
       <button id="fullscreenButton" type="button">Enter fullscreen</button>
-      <p>Connect your ESP32 WebSocket in <code>app.js</code>.</p>
+      <a class="menu-link" href="/progress">See Progress ↗</a>
+      <button id="switchSessionButton" type="button">Switch session</button>
+      <button id="backDashboardButton" type="button">Back to dashboard</button>
+      <p id="espConnectionNote">Checking session mode…</p>
+    </div>
+
+    <div class="session-summary-backdrop" id="sessionSummaryModal" role="dialog" aria-modal="true" aria-labelledby="summaryTitle" hidden>
+      <section class="session-summary-card glass">
+        <span class="summary-eyebrow">DOULA · Cycling Summary</span>
+        <h2 id="summaryTitle">Cycling Session Ended</h2>
+        <p class="summary-status" id="summarySaveStatus" role="status">Saving session to Track Progress…</p>
+
+        <div class="summary-metrics">
+          <div>
+            <span>Duration</span>
+            <strong id="summaryDuration">00:00</strong>
+          </div>
+          <div>
+            <span>Logged Reps</span>
+            <strong id="summaryReps">1</strong>
+          </div>
+          <div>
+            <span>Avg Torque</span>
+            <strong id="summaryTorque">112 Nm</strong>
+          </div>
+        </div>
+
+        <div class="summary-actions">
+          <button class="summary-btn summary-btn-retry" id="retrySaveBtn" type="button" hidden>Retry Save</button>
+          <a class="summary-btn summary-btn-primary" href="/progress">See Progress ↗</a>
+          <a class="summary-btn" href="/device/">Switch Session</a>
+          <button class="summary-btn" id="restartRideBtn" type="button">Start New Ride</button>
+        </div>
+      </section>
     </div>
   </main>
-  <script src="app.js"></script>
+  <script src="session.js"></script>
 </body>
 </html>

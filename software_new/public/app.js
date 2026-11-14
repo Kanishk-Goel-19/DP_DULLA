@@ -1,5 +1,3 @@
-import { createExerciseUI } from './exercise.js'
-
 const root = document.querySelector('#app')
 const state = {
   view: 'welcome', name: '', email: '', password: '', otp: ['', '', '', ''],
@@ -8,6 +6,12 @@ const state = {
   progress: [], progressError: ''
 }
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[character]))
+
+function applySessionState(result) {
+  state.user = result?.user ?? null
+  state.connectionMode = result?.connectionMode || 'none'
+  state.connected = state.connectionMode === 'connected'
+}
 
 async function api(path, options = {}) {
   const response = await fetch('/api' + path, {
@@ -21,12 +25,15 @@ async function api(path, options = {}) {
   return data
 }
 function navigate(path) {
-  if (location.pathname === '/device' && path !== '/device') exercises.reset()
+  if (path === '/device' || path === '/device/') {
+    window.location.assign('/device/')
+    return
+  }
   history.pushState({}, '', path)
   state.menu = false
   state.message = ''
   render()
-  if ((path === '/progress' || path === '/device') && state.user) void loadProgress()
+  if (path === '/progress' && state.user) void loadProgress()
   scrollTo({ top: 0, behavior: 'instant' })
 }
 async function loadProgress() {
@@ -36,9 +43,8 @@ async function loadProgress() {
     state.progress = result.sessions
     state.progressError = ''
   } catch (error) { state.progressError = error.message || 'Could not load sessions.' }
-  if (['/device', '/progress'].includes(location.pathname)) render()
+  if (location.pathname === '/progress') render()
 }
-const exercises = createExerciseUI({ state, api, render, navigate, escapeHtml, loadProgress })
 function alertMarkup() {
   return state.message ? `<p class="auth-alert ${state.info ? 'info' : ''}" role="status">${escapeHtml(state.message)}</p>` : ''
 }
@@ -106,18 +112,18 @@ function progressPage() {
   const rows = sessions.map(row => {
     const day = new Date(row.date)
     const date = Number.isNaN(day.getTime()) ? escapeHtml(row.date || '') : escapeHtml(day.toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }))
-    return `<tr><td>${date}</td><td><strong>${escapeHtml(row.type)}</strong></td><td>${Number(row.reps)}</td><td><span class="trial-chip">${row.source === 'demo' ? 'Demo' : 'Connected preview'}</span></td></tr>`
+    return `<tr><td>${date}</td><td><strong>${escapeHtml(row.type)}</strong>${row.mode && row.mode !== row.type ? `<div class="progress-subtype">${escapeHtml(row.mode)}${Number.isFinite(Number(row.torqueNm)) ? ` · ${Number(row.torqueNm)} N·m` : ''}</div>` : ''}</td><td>${Number(row.reps)}</td><td><span class="trial-chip">${row.source === 'demo' ? 'Demo' : 'Connected preview'}</span></td></tr>`
   }).join('')
-  return `${header()}<main class="inner-page progress-page"><div class="inner-eyebrow">DOULA: Rehabilitation records</div><h1 class="inner-title">Track Progress</h1><p class="inner-description">Your completed exercise trials, saved to your account on this computer. These counts are simulated by the interface, not measured by the ESP32.</p>
+  return `${header()}<main class="inner-page progress-page"><div class="inner-eyebrow">DOULA: Rehabilitation records</div><h1 class="inner-title">Track Progress</h1><p class="inner-description">Your completed exercise sessions, saved to your account on this computer.</p>
     <section class="progress-summary"><article><span>Sessions completed</span><strong>${sessions.length}</strong></article><article><span>Simulated repetitions</span><strong>${totalReps}</strong></article><article><span>Exercise types tried</span><strong>${modes}</strong></article></section>
-    <section class="surface-panel"><h2>Previous exercises</h2>${state.progressError ? `<p class="progress-error" role="alert">${escapeHtml(state.progressError)}</p>` : ''}${sessions.length ? `<div class="progress-table-wrap"><table class="simple-table"><thead><tr><th>Date & time</th><th>Exercise</th><th>Reps</th><th>Mode</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p>No sessions recorded yet. Try the exercise interface in Demo mode to create your first entry.</p>'}</section><a class="inline-link" href="/dashboard" data-link>← Back to home</a></main>`
+    <section class="surface-panel"><h2>Previous exercises</h2>${state.progressError ? `<p class="progress-error" role="alert">${escapeHtml(state.progressError)}</p>` : ''}${sessions.length ? `<div class="progress-table-wrap"><table class="simple-table"><thead><tr><th>Date & time</th><th>Exercise</th><th>Reps</th><th>Mode</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p>No sessions recorded yet. Complete a Cycling or Flexion &amp; Extension session to create your first entry.</p>'}</section><a class="inline-link" href="/dashboard" data-link>← Back to home</a></main>`
 }
 function extraPage() {
   const path = location.pathname
   if (path === '/progress') return progressPage()
   if (path === '/how-to') return `${header()}<main class="inner-page"><div class="inner-eyebrow">DOULA: Guide</div><h1 class="inner-title">How-to</h1><p class="inner-description">A place for your DOULA device instructions and documents.</p><section class="surface-panel"><h2>Device guide</h2><p>The operating instructions will be added when the device workflow is finalized. Please use the device only with appropriate supervision.</p></section><a href="/dashboard" class="inline-link" data-link>← Back to home</a></main>`
   if (path === '/about') return `${header()}<main class="inner-page"><div class="inner-eyebrow">Meet DOULA</div><h1 class="inner-title">About Us</h1><p class="inner-description">DOULA is a prototype knee rehabilitation device with ESP32-based controllers.</p><section class="surface-panel"><h2>Our project</h2><p>More information about the DOULA team and the device will be added here.</p></section><a href="/dashboard" class="inline-link" data-link>← Back to home</a></main>`
-  if (path === '/device') return state.connectionMode !== 'none' ? exercises.html() : `${header()}<main class="inner-page"><h1 class="inner-title">Exercise interface</h1><p class="inner-description">Go back to the dashboard to check the ESP32 or open Demo mode.</p><a data-link href="/dashboard" class="inline-link">← Back to home</a></main>`
+  if (path === '/device') return `${header()}<main class="inner-page"><h1 class="inner-title">Exercise interface</h1><p class="inner-description">Go back to the dashboard to check the ESP32 or open Demo mode.</p><a data-link href="/dashboard" class="inline-link">← Back to home</a></main>`
   return dashboard()
 }
 function render() {
@@ -134,7 +140,6 @@ async function withPending(task) {
   finally { state.busy=false;render() }
 }
 function attachEvents() {
-  if (state.user && location.pathname === '/device' && state.connectionMode !== 'none') exercises.attach()
   document.querySelector('#go-login')?.addEventListener('click',()=>switchAuth('login'))
   document.querySelector('#go-signup')?.addEventListener('click',()=>switchAuth('signup'))
   document.querySelector('#auth-back')?.addEventListener('click',()=>switchAuth(state.view==='password'?'verify':state.view==='verify'?'signup':'welcome'))
@@ -147,7 +152,7 @@ function attachEvents() {
   document.querySelector('#login-form')?.addEventListener('submit',e=>{
     e.preventDefault();withPending(async()=>{
       const result=await api('/auth/login',{method:'POST',body:{email:state.email,password:state.password}})
-      state.user=result.user;state.password='';navigate('/dashboard')
+      applySessionState(result);state.password='';navigate('/dashboard')
     })
   })
   document.querySelector('#signup-form')?.addEventListener('submit',e=>{
@@ -177,28 +182,32 @@ function attachEvents() {
   document.querySelector('#password-form')?.addEventListener('submit',e=>{
     e.preventDefault();withPending(async()=>{
       const result=await api('/auth/finish',{method:'POST',body:{password:state.password}})
-      state.user=result.user;state.password='';navigate('/dashboard')
+      applySessionState(result);state.password='';navigate('/dashboard')
     })
   })
   document.querySelector('#toggle-menu')?.addEventListener('click',()=>{state.menu=!state.menu;render()})
   document.querySelectorAll('[data-link]').forEach(el=>el.addEventListener('click',e=>{e.preventDefault();navigate(el.getAttribute('href'))}))
   document.querySelectorAll('[data-logout]').forEach(el=>el.addEventListener('click',()=>withPending(async()=>{
-    await api('/auth/logout',{method:'POST'});exercises.reset();state.user=null;state.view='login';state.email='';state.password='';state.menu=false;state.connected=false;state.connectionMode='none';state.connection='';state.progress=[];navigate('/')
+    await api('/auth/logout',{method:'POST'});state.user=null;state.view='login';state.email='';state.password='';state.menu=false;state.connected=false;state.connectionMode='none';state.connection='';state.progress=[];navigate('/')
   })))
-  document.querySelector('#demo-btn')?.addEventListener('click',()=>{
-    exercises.reset();state.connected=false;state.connectionMode='demo';state.connection='';navigate('/device')
-  })
+  document.querySelector('#demo-btn')?.addEventListener('click',()=>withPending(async()=>{
+    await api('/device/demo',{method:'POST'})
+    state.connected=false;state.connectionMode='demo';state.connection='';state.connectionError=false
+    window.location.assign('/device/')
+  }))
   document.querySelector('#connect-btn')?.addEventListener('click',()=>withPending(async()=>{
     const result=await api('/device/status')
-    if(result.connected){exercises.reset();state.connected=true;state.connectionMode='connected';state.connection='';navigate('/device')}
-    else{state.connection=result.message;state.connectionError=true}
+    if(result.connected){
+      state.connected=true;state.connectionMode='connected';state.connection='';state.connectionError=false
+      window.location.assign('/device/')
+    } else { state.connection=result.message;state.connectionError=true }
   }))
 }
-window.addEventListener('popstate',()=>{if(location.pathname !== '/device')exercises.reset();render();if(location.pathname==='/progress'&&state.user)void loadProgress()})
+window.addEventListener('popstate',()=>{render();if(location.pathname==='/progress'&&state.user)void loadProgress()})
 ;(async()=>{
   try {
     const result=await api('/me')
-    state.user=result.user
+    applySessionState(result)
     if(state.user&&location.pathname==='/progress'){
       const progress=await api('/progress');state.progress=progress.sessions
     }

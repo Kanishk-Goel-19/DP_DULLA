@@ -1,17 +1,26 @@
-// -----------------------------------------------------------------------------
-// VIDEO SETUP
-// Put your four videos in a folder named "videos" beside index.html, or replace
-// these paths with direct MP4 URLs. MP4/H.264 is the safest browser format.
-// Keep the videos muted: mobile browsers commonly block autoplay with sound.
-// -----------------------------------------------------------------------------
-
-
 const $ = (id) => document.getElementById(id);
 const video = $("backgroundVideo");
+const youtubeFrame = $("youtubeBackground");
 
-let demoRunning = true;
+let socket = null;
+let deviceMode = "demo";
+let wsUrl = "";
+let wsConnected = false;
 let demoTimer = null;
+let rideClockTimer = null;
 let motionFrame = null;
+
+let paused = false;
+let ended = false;
+let saving = false;
+let saved = false;
+
+let activeMs = 0;
+let lastTickAt = 0;
+let simulatedCycles = 0;
+let torqueSum = 0;
+let torqueSamples = 0;
+
 let rpm = 78, speed = 24.5, torque = 112;
 let visual = { rpm: 78, speed: 24.5, torque: 112 };
 let animationFrom = { ...visual };
@@ -22,7 +31,6 @@ const animationDuration = 360;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 
-// Draw fine, evenly spaced dial marks along the same 270-degree open arc.
 function buildTicks(groupId, cx, cy, radius, count, innerLength, outerLength) {
   const group = $(groupId);
   const ns = "http://www.w3.org/2000/svg";
@@ -45,18 +53,23 @@ buildTicks("rpmTicks", 60, 50, 44, 34, 2.5, 1.2);
 buildTicks("torqueTicks", 60, 50, 44, 34, 2.5, 1.2);
 buildTicks("speedTicks", 110, 96, 86, 42, 3.2, 1.3);
 
+function formatDuration(ms) {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const mins = String(Math.floor(totalSec / 60)).padStart(2, "0");
+  const secs = String(totalSec % 60).padStart(2, "0");
+  return `${mins}:${secs}`;
+}
+
 function paintMetrics(values) {
   $("rpmValue").textContent = Math.round(values.rpm);
   $("speedValue").textContent = values.speed.toFixed(1);
   $("torqueValue").textContent = Math.round(values.torque);
 
-  // SVG pathLength is normalized to 1000, so progress is accurate and smooth.
   $("rpmProgress").style.strokeDashoffset = 1000 * (1 - clamp(values.rpm / 140, 0, 1));
   $("speedProgress").style.strokeDashoffset = 1000 * (1 - clamp(values.speed / 40, 0, 1));
   $("torqueProgress").style.strokeDashoffset = 1000 * (1 - clamp(values.torque / 180, 0, 1));
 }
 
-// Interpolates both the readouts and the SVG arcs instead of jumping between values.
 function animateMetrics(now) {
   const progress = clamp((now - animationStarted) / animationDuration, 0, 1);
   const eased = easeOutCubic(progress);
@@ -87,122 +100,318 @@ function setMetricTargets(next) {
   if (motionFrame === null) motionFrame = requestAnimationFrame(animateMetrics);
 }
 
+function updateRideStatusUI() {
+  const pill = $("rideStatusPill");
+  const pauseBtn = $("pauseResumeBtn");
+  const note = $("espConnectionNote");
+
+  pill.classList.remove("is-paused", "is-live");
+  pauseBtn.classList.toggle("is-paused", paused);
+
+  if (ended) {
+    pill.textContent = "Session Ended";
+    pauseBtn.disabled = true;
+  } else if (paused) {
+    pill.textContent = "Paused";
+    pill.classList.add("is-paused");
+    pauseBtn.textContent = "Resume Session";
+    pauseBtn.disabled = false;
+  } else if (wsConnected) {
+    pill.textContent = "ESP32 Live";
+    pill.classList.add("is-live");
+    pauseBtn.textContent = "Pause Session";
+    pauseBtn.disabled = false;
+  } else {
+    pill.textContent = deviceMode === "demo" ? "Demo Mode" : "Connected Preview";
+    pauseBtn.textContent = "Pause Session";
+    pauseBtn.disabled = false;
+  }
+
+  $("rideTimerText").textContent = formatDuration(activeMs);
+  $("rideRepsText").textContent = `${Math.floor(simulatedCycles)} cycles`;
+
+  if (wsConnected) {
+    note.textContent = `Connected to ESP32 telemetry (${wsUrl}).`;
+  } else if (wsUrl) {
+    note.textContent = `ESP32 offline at ${wsUrl} — showing preview simulation.`;
+  } else {
+    note.textContent = deviceMode === "demo"
+      ? "Demo mode active — cycling metrics & cycles are simulated locally."
+      : "Connected preview active — click End Session to save into Track Progress.";
+  }
+}
+
 function updateFromESP(data) {
-  // Expected JSON: {"rpm":78,"speed":24.5,"torque":112}
-  if (!data || typeof data !== "object") return;
+  if (!data || typeof data !== "object" || paused || ended) return;
   const next = {
     rpm: Number.isFinite(Number(data.rpm)) ? Number(data.rpm) : animationTo.rpm,
     speed: Number.isFinite(Number(data.speed)) ? Number(data.speed) : animationTo.speed,
     torque: Number.isFinite(Number(data.torque)) ? Number(data.torque) : animationTo.torque
   };
+  rpm = next.rpm;
+  speed = next.speed;
+  torque = next.torque;
+  torqueSum += next.torque;
+  torqueSamples += 1;
+  if (Number.isFinite(Number(data.reps))) {
+    simulatedCycles = Math.max(simulatedCycles, Number(data.reps));
+  }
   setMetricTargets(next);
 }
 
-// Demo values let you inspect the UI before the ESP32 is connected.
 function startDemo() {
   stopDemo();
-  demoRunning = true;
+  if (paused || ended || wsConnected) return;
   demoTimer = setInterval(() => {
+    if (paused || ended || wsConnected) return;
     rpm = clamp(rpm + (Math.random() - 0.48) * 5, 45, 125);
     speed = clamp(speed + (Math.random() - 0.5) * 1.1, 5, 40);
     torque = clamp(torque + (Math.random() - 0.5) * 7, 35, 175);
+    torqueSum += torque;
+    torqueSamples += 1;
     setMetricTargets({ rpm, speed, torque });
   }, 250);
 }
+
 function stopDemo() {
   if (demoTimer !== null) clearInterval(demoTimer);
   demoTimer = null;
-  demoRunning = false;
 }
 
-// -----------------------------------------------------------------------------
-// VIDEO HANDLING
-// A selected scenery button swaps the video source, reloads it and attempts to
-// play it. A tap-to-play control appears if the browser blocks autoplay.
-// -----------------------------------------------------------------------------
+function startRideClock() {
+  stopRideClock();
+  lastTickAt = performance.now();
+  rideClockTimer = setInterval(() => {
+    const now = performance.now();
+    const dt = now - lastTickAt;
+    lastTickAt = now;
+    if (!paused && !ended) {
+      activeMs += dt;
+      // Count 1 cycling rep/cycle roughly every 3.5 seconds weighted by cadence.
+      const cadenceFactor = clamp(rpm / 75, 0.4, 1.8);
+      simulatedCycles += (dt / 3500) * cadenceFactor;
+      $("rideTimerText").textContent = formatDuration(activeMs);
+      $("rideRepsText").textContent = `${Math.floor(simulatedCycles)} cycles`;
+    }
+  }, 500);
+}
+
+function stopRideClock() {
+  if (rideClockTimer !== null) clearInterval(rideClockTimer);
+  rideClockTimer = null;
+}
+
+function controlBackgroundPlayback(play) {
+  if (video && video.src) {
+    if (play) video.play().catch(() => {});
+    else video.pause();
+  }
+  if (youtubeFrame?.contentWindow) {
+    youtubeFrame.contentWindow.postMessage(
+      JSON.stringify({ event: "command", func: play ? "playVideo" : "pauseVideo", args: [] }),
+      "https://www.youtube.com"
+    );
+  }
+}
+
+function sendEspCommand(payload) {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify(payload));
+  }
+}
+
 const SCENE_VIDEOS = {
-    forest: "https://www.youtube.com/watch?v=MWyBgudQqsI&pp=ygUYZm9yZXN0IGN5Y2xpbmcgcG92IHZpZGVv",
-    beach: "https://www.youtube.com/watch?v=YOUR_BEACH_ID",
-    nightCity: "https://www.youtube.com/watch?v=XX8km2vJbkQ&pp=ygUTdG9reW8gbmlnaHQgY3ljbGluZw%3D%3D",
-    mountains: "https://www.youtube.com/shorts/1euzUN4eSkE"
+  forest: "https://www.youtube.com/watch?v=MWyBgudQqsI&pp=ygUYZm9yZXN0IGN5Y2xpbmcgcG92IHZpZGVv",
+  beach: "https://www.youtube.com/watch?v=YOUR_BEACH_ID",
+  nightCity: "https://www.youtube.com/watch?v=XX8km2vJbkQ&pp=ygUTdG9reW8gbmlnaHQgY3ljbGluZw%3D%3D",
+  mountains: "https://www.youtube.com/shorts/1euzUN4eSkE"
 };
 
-const youtubeFrame = document.getElementById("youtubeBackground");
-
 function getYouTubeID(url) {
-    try {
-        const parsed = new URL(url);
-
-        if (parsed.hostname.includes("youtu.be")) {
-            return parsed.pathname.substring(1);
-        }
-
-        if (parsed.hostname.includes("youtube.com")) {
-            if (parsed.pathname === "/watch") {
-                return parsed.searchParams.get("v");
-            }
-
-            if (parsed.pathname.startsWith("/embed/")) {
-                return parsed.pathname.split("/")[2];
-            }
-        }
-    } catch (error) {
-        console.error("Invalid YouTube URL", error);
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.includes("youtu.be")) return parsed.pathname.substring(1);
+    if (parsed.hostname.includes("youtube.com")) {
+      if (parsed.pathname === "/watch") return parsed.searchParams.get("v");
+      if (parsed.pathname.startsWith("/embed/") || parsed.pathname.startsWith("/shorts/")) {
+        return parsed.pathname.split("/")[2];
+      }
     }
-
-    return null;
+  } catch (error) {
+    console.error("Invalid YouTube URL", error);
+  }
+  return null;
 }
 
 function changeScene(scene) {
-    const url = SCENE_VIDEOS[scene];
-    const videoID = getYouTubeID(url);
+  const url = SCENE_VIDEOS[scene];
+  const videoID = getYouTubeID(url);
+  if (!videoID || videoID.startsWith("YOUR_")) return;
 
-    if (!videoID) {
-        console.error("Invalid YouTube video URL");
-        return;
-    }
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
 
-    // Stop the previous MP4 video, if any.
-    video.pause();
-    video.removeAttribute("src");
-    video.load();
-
-    // Load the selected YouTube video.
-    youtubeFrame.src =
-        `https://www.youtube.com/embed/${videoID}` +
-        `?autoplay=1&mute=1&controls=0&loop=1` +
-        `&playlist=${videoID}&playsinline=1&rel=0`;
+  youtubeFrame.src =
+    `https://www.youtube.com/embed/${videoID}` +
+    `?enablejsapi=1&autoplay=1&mute=1&controls=0&loop=1` +
+    `&playlist=${videoID}&playsinline=1&rel=0`;
 }
 
-// ESP32 WebSocket integration — uncomment when the firmware endpoint is ready.
-// const socket = new WebSocket("ws://192.168.4.1/ws");
-// socket.addEventListener("message", (event) => {
-//   try { updateFromESP(JSON.parse(event.data)); }
-//   catch (error) { console.warn("Invalid ESP32 data packet", error); }
-// });
-// socket.addEventListener("close", () => console.log("ESP32 disconnected"));
+function connectEspSocket() {
+  if (!wsUrl || !/^wss?:\/\//.test(wsUrl)) return;
+  try {
+    socket = new WebSocket(wsUrl);
+    socket.addEventListener("open", () => {
+      wsConnected = true;
+      stopDemo();
+      updateRideStatusUI();
+    });
+    socket.addEventListener("message", (event) => {
+      try { updateFromESP(JSON.parse(event.data)); }
+      catch (error) { console.warn("Invalid ESP32 data packet", error); }
+    });
+    socket.addEventListener("close", () => {
+      wsConnected = false;
+      updateRideStatusUI();
+      if (!paused && !ended) startDemo();
+    });
+    socket.addEventListener("error", () => {
+      wsConnected = false;
+      updateRideStatusUI();
+    });
+  } catch {
+    wsConnected = false;
+  }
+}
+
+async function persistCyclingSession() {
+  if (saving || saved) return;
+  saving = true;
+  const statusEl = $("summarySaveStatus");
+  const retryBtn = $("retrySaveBtn");
+  statusEl.className = "summary-status";
+  statusEl.textContent = "Saving session to Track Progress…";
+  retryBtn.hidden = true;
+
+  const durationSeconds = Math.max(0, Math.round(activeMs / 1000));
+  const reps = clamp(Math.round(simulatedCycles), 1, 99);
+  const avgTorque = Math.round((torqueSamples ? torqueSum / torqueSamples : torque) * 10) / 10;
+
+  $("summaryDuration").textContent = formatDuration(durationSeconds * 1000);
+  $("summaryReps").textContent = String(reps);
+  $("summaryTorque").textContent = `${avgTorque} Nm`;
+
+  try {
+    const response = await fetch("/api/progress", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        type: "Cycling",
+        mode: "Cycling",
+        torqueNm: avgTorque,
+        reps,
+        durationSeconds,
+        source: deviceMode === "demo" ? "demo" : "connected-preview"
+      })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.message || "Could not save session.");
+    saved = true;
+    statusEl.className = "summary-status saved";
+    statusEl.textContent = "Session saved to Track Progress ✓";
+  } catch (error) {
+    statusEl.className = "summary-status error";
+    statusEl.textContent = `${error.message} Click Retry Save.`;
+    retryBtn.hidden = false;
+  } finally {
+    saving = false;
+  }
+}
+
+function togglePauseSession() {
+  if (ended) return;
+  paused = !paused;
+  lastTickAt = performance.now();
+  if (paused) {
+    stopDemo();
+    controlBackgroundPlayback(false);
+    sendEspCommand({ type: "pause_session" });
+  } else {
+    controlBackgroundPlayback(true);
+    sendEspCommand({ type: "resume_session" });
+    if (!wsConnected) startDemo();
+  }
+  updateRideStatusUI();
+}
+
+function endCyclingSession() {
+  if (ended) return;
+  ended = true;
+  paused = true;
+  stopDemo();
+  stopRideClock();
+  controlBackgroundPlayback(false);
+  sendEspCommand({ type: "stop_session" });
+  updateRideStatusUI();
+  $("menuPanel").classList.remove("open");
+  $("sessionSummaryModal").hidden = false;
+  void persistCyclingSession();
+}
+
+function restartCyclingSession() {
+  ended = false;
+  paused = false;
+  saved = false;
+  saving = false;
+  activeMs = 0;
+  simulatedCycles = 0;
+  torqueSum = 0;
+  torqueSamples = 0;
+  lastTickAt = performance.now();
+  $("sessionSummaryModal").hidden = true;
+  controlBackgroundPlayback(true);
+  if (!wsConnected) startDemo();
+  startRideClock();
+  updateRideStatusUI();
+}
 
 function updateClock() {
   $("clock").textContent = new Intl.DateTimeFormat([], {
     hour: "2-digit", minute: "2-digit"
   }).format(new Date());
 }
+
+async function initSession() {
+  try {
+    const res = await fetch("/api/device/config", { credentials: "same-origin" });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok) {
+        deviceMode = data.deviceMode === "connected" ? "connected" : "demo";
+        wsUrl = data.wsUrl || "";
+      }
+    }
+  } catch {}
+  updateRideStatusUI();
+  connectEspSocket();
+  if (!wsConnected) startDemo();
+}
+
 updateClock();
 setInterval(updateClock, 15000);
 paintMetrics(visual);
-startDemo();
 changeScene("forest");
+startRideClock();
+void initSession();
 
 $("menuButton").addEventListener("click", () => $("menuPanel").classList.toggle("open"));
-$("demoToggle").addEventListener("click", (event) => {
-  if (demoRunning) {
-    stopDemo();
-    event.currentTarget.textContent = "Resume demo data";
-  } else {
-    startDemo();
-    event.currentTarget.textContent = "Pause demo data";
-  }
-});
+$("pauseResumeBtn").addEventListener("click", togglePauseSession);
+$("endSessionBtn").addEventListener("click", endCyclingSession);
+$("retrySaveBtn").addEventListener("click", () => void persistCyclingSession());
+$("restartRideBtn").addEventListener("click", restartCyclingSession);
+
 $("fullscreenButton").addEventListener("click", async () => {
   try {
     if (!document.fullscreenElement) await $("dashboard").requestFullscreen();
@@ -211,6 +420,9 @@ $("fullscreenButton").addEventListener("click", async () => {
     console.warn("Fullscreen unavailable", error);
   }
 });
+
+$("switchSessionButton").addEventListener("click", () => window.location.assign("/device/"));
+$("backDashboardButton").addEventListener("click", () => window.location.assign("/dashboard"));
 
 document.querySelectorAll(".scene-option").forEach((button) => {
   button.addEventListener("click", () => {
@@ -224,3 +436,5 @@ document.querySelectorAll(".scene-option").forEach((button) => {
     changeScene(button.dataset.scene);
   });
 });
+
+window.doulaCycling = { updateFromESP };

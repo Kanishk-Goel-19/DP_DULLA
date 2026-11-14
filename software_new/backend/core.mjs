@@ -103,15 +103,20 @@ export class AuthStore {
     const reps = Number(details?.reps)
     const source = String(details?.source || '')
     const durationSeconds = Number(details?.durationSeconds ?? 0)
+    const rawMode = details?.mode === undefined || details?.mode === null ? '' : String(details.mode).trim().slice(0, 64)
+    const rawTorque = details?.torqueNm === undefined || details?.torqueNm === null || details?.torqueNm === '' ? null : Number(details.torqueNm)
     if (!['Support', 'Resistance', 'Cycling'].includes(type)) throw new Error('Select a valid exercise type.')
     if (!Number.isInteger(reps) || reps < 1 || reps > 99) throw new Error('Repetitions must be between 1 and 99.')
     if (!['demo', 'connected-preview'].includes(source)) throw new Error('Invalid session mode.')
     if (!Number.isFinite(durationSeconds) || durationSeconds < 0 || durationSeconds > 86400) throw new Error('Invalid session duration.')
+    if (rawTorque !== null && (!Number.isFinite(rawTorque) || rawTorque < 0 || rawTorque > 200)) throw new Error('Invalid torque value.')
 
     const session = {
       id: randomBytes(12).toString('hex'),
       userId,
       type,
+      ...(rawMode ? { mode: rawMode } : {}),
+      ...(rawTorque !== null ? { torqueNm: Math.round(rawTorque * 10) / 10 } : {}),
       reps,
       source,
       verifiedByDevice: false,
