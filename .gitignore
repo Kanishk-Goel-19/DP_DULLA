@@ -1,19 +1,4 @@
-# SolidWorks & CAD temporary lock / backup files
-~$*
-*.~*
-*.bak
-*.tmp
-swxJRNL.swj
-swxJRNL.bak
-
-# OS metadata
+.env
+backend/data/*.json
 .DS_Store
-Thumbs.db
-desktop.ini
-
-# Build & IDE caches
-.pio/
-.vscode/
-build/
-__pycache__/
-*.pyc
+node_modules/
