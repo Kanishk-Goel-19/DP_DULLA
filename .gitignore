@@ -1,4 +1,19 @@
-.env
-backend/data/*.json
+# SolidWorks & CAD temporary lock / backup files
+~$*
+*.~*
+*.bak
+*.tmp
+swxJRNL.swj
+swxJRNL.bak
+
+# OS metadata
 .DS_Store
-node_modules/
+Thumbs.db
+desktop.ini
+
+# Build & IDE caches
+.pio/
+.vscode/
+build/
+__pycache__/
+*.pyc
