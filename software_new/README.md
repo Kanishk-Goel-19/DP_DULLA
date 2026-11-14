@@ -43,7 +43,7 @@ There is no Confirm Password, Forgot Password, or other account-management UI.
 - **Track Progress** shows saved sessions (initially empty, because device telemetry has not been integrated).
 - **How-to** and **About Us** are simple placeholders awaiting your documents.
 
-## 4. ESP32 — Connect Device button
+## 4. ESP32 — Connect Device, Bypass Mode & Start Session
 
 When U1/ESP_MASTER's WebSocket URL is known:
 
@@ -51,7 +51,21 @@ When U1/ESP_MASTER's WebSocket URL is known:
 2. The computer running the backend must be able to reach the ESP32 on the same network.
 3. Restart the server.
 4. Click **Connect Device**. The backend attempts a WebSocket handshake with U1.
-5. If the handshake succeeds, the browser goes to the new device page. If it fails, a message is shown and the dashboard stays open.
+5. If the handshake succeeds, **Connect Device** is replaced by **Start Session**, which launches the cycling session page served from `../software/session.html`. If it fails, a message is shown and the dashboard stays open.
+
+### Testing without hardware (bypass ESP32 check)
+
+For local UI testing before the ESP32 is connected:
+
+```bash
+npm run start:bypass
+# or with auto-reload while developing:
+npm run dev:bypass
+```
+
+(Alternatively, set `ESP32_BYPASS=true` in `.env`.)
+
+When bypass mode is active, the dashboard replaces **Connect Device** with **Start Session** automatically so you can click straight into the cycling session page (`/session/`).
 
 A successful handshake only means the ESP32 WebSocket endpoint responded; it does not prove that every sensor or mechanical subsystem is healthy. A proper heartbeat/health response can be added once firmware protocol is shared.
 

@@ -142,7 +142,7 @@ function getYouTubeID(url) {
                 return parsed.searchParams.get("v");
             }
 
-            if (parsed.pathname.startsWith("/embed/")) {
+            if (parsed.pathname.startsWith("/embed/") || parsed.pathname.startsWith("/shorts/")) {
                 return parsed.pathname.split("/")[2];
             }
         }
@@ -211,6 +211,14 @@ $("fullscreenButton").addEventListener("click", async () => {
     console.warn("Fullscreen unavailable", error);
   }
 });
+
+const backDashboardButton = $("backDashboardButton");
+if (backDashboardButton && window.location.pathname.startsWith("/session")) {
+  backDashboardButton.hidden = false;
+  backDashboardButton.addEventListener("click", () => {
+    window.location.assign("/dashboard");
+  });
+}
 
 document.querySelectorAll(".scene-option").forEach((button) => {
   button.addEventListener("click", () => {

@@ -2,7 +2,7 @@ const root = document.querySelector('#app')
 const state = {
   view: 'welcome', name: '', email: '', password: '', otp: ['', '', '', ''],
   user: null, busy: false, message: '', info: false, menu: false,
-  connection: '', connectionError: false, connected: false, progress: []
+  connection: '', connectionError: false, connected: false, bypassed: false, progress: []
 }
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[character]))
 
@@ -79,10 +79,14 @@ function header() {
   </header>`
 }
 function dashboard() {
+  const actionMarkup = state.connected
+    ? `<p>Ready to begin your rehabilitation session.</p>
+      <button class="connect-btn start-session-btn" id="start-session-btn" type="button">Start Session</button>`
+    : `<p>Check if the rehabilitation device is connected</p>
+      <button class="connect-btn" id="connect-btn" type="button" ${state.busy?'disabled':''}>${state.busy?'Checking…':'Connect Device'}</button>`
   return `${header()}<main class="dashboard-main"><h1 class="hero-title">Knee Rehabilitation</h1>
     <div class="hero-art"><div class="sage-band"></div><div class="photo-frame"><img src="/assets/rehabilitation.jpg" alt="Person receiving support during knee rehabilitation" /></div></div>
-    <section class="hero-bottom"><div class="micro-label">DOULA: Knee Rehabilitation</div><h2>Start exercising</h2><p>Check if the rehabilitation device is connected</p>
-      <button class="connect-btn" id="connect-btn" type="button" ${state.busy?'disabled':''}>${state.busy?'Checking…':'Connect Device'}</button>
+    <section class="hero-bottom"><div class="micro-label">DOULA: Knee Rehabilitation</div><h2>Start exercising</h2>${actionMarkup}
       ${state.connection?`<p class="connect-status ${state.connectionError?'error':''}" role="status">${escapeHtml(state.connection)}</p>`:''}
     </section></main>`
 }
@@ -91,12 +95,23 @@ function extraPage() {
   if (path === '/progress') return `${header()}<main class="inner-page"><div class="inner-eyebrow">DOULA: Rehabilitation records</div><h1 class="inner-title">Track Progress</h1><p class="inner-description">Your previous rehabilitation sessions will appear here once DOULA starts recording them.</p><section class="surface-panel"><h2>${state.progress.length?'Previous sessions':'No sessions recorded yet.'}</h2>${state.progress.length?`<table class="simple-table"><thead><tr><th>Date</th><th>Session</th></tr></thead><tbody>${state.progress.map((s,i)=>`<tr><td>${escapeHtml(s.date || '')}</td><td>${escapeHtml(s.label || 'Session '+(i+1))}</td></tr>`).join('')}</tbody></table>`:'<p>Complete a session with the device to start building your history.</p>'}</section><a href="/dashboard" class="inline-link" data-link>← Back to home</a></main>`
   if (path === '/how-to') return `${header()}<main class="inner-page"><div class="inner-eyebrow">DOULA: Guide</div><h1 class="inner-title">How-to</h1><p class="inner-description">A place for your DOULA device instructions and documents.</p><section class="surface-panel"><h2>Device guide</h2><p>The operating instructions will be added when the device workflow is finalized. Please use the device only with appropriate supervision.</p></section><a href="/dashboard" class="inline-link" data-link>← Back to home</a></main>`
   if (path === '/about') return `${header()}<main class="inner-page"><div class="inner-eyebrow">Meet DOULA</div><h1 class="inner-title">About Us</h1><p class="inner-description">DOULA is a prototype knee rehabilitation device with ESP32-based controllers.</p><section class="surface-panel"><h2>Our project</h2><p>More information about the DOULA team and the device will be added here.</p></section><a href="/dashboard" class="inline-link" data-link>← Back to home</a></main>`
-  if (path === '/device') return `${header()}<main class="inner-page"><div class="inner-eyebrow">DOULA: Device</div><h1 class="inner-title">Device connection</h1><p class="inner-description">${state.connected ? 'The ESP32 coordinator responded to the connection check. This page will contain your exercise and monitoring controls once we have the device protocol.' : 'Please use Connect Device on the dashboard to check the ESP32.'}</p><div class="surface-panel">${state.connected?'<span class="pill-status">● ESP32 responded</span>':'<h2>Device not checked yet</h2>'}<p style="margin-top:16px">No movement commands or motor controls are sent from this prototype page.</p></div><a href="/dashboard" class="inline-link" data-link>← Back to home</a></main>`
+  if (path === '/device') return `${header()}<main class="inner-page"><div class="inner-eyebrow">DOULA: Device</div><h1 class="inner-title">Device connection</h1><p class="inner-description">${state.connected ? 'The device check is satisfied. You can launch the cycling rehabilitation session now.' : 'Please use Connect Device on the dashboard to check the ESP32.'}</p><div class="surface-panel">${state.connected?`<span class="pill-status">● ${state.bypassed ? 'ESP32 check bypassed (testing mode)' : 'ESP32 responded'}</span><div style="margin-top:20px"><button class="connect-btn start-session-btn" id="start-session-btn" type="button">Start Session</button></div>`:'<h2>Device not checked yet</h2>'}<p style="margin-top:16px">No movement commands or motor controls are sent from this prototype page.</p></div><a href="/dashboard" class="inline-link" data-link>← Back to home</a></main>`
   return dashboard()
 }
 function render() {
   root.innerHTML = state.user ? (location.pathname === '/dashboard' || location.pathname === '/' ? dashboard() : extraPage()) : authPage()
   attachEvents()
+}
+function applyAuthSession(result) {
+  state.user = result.user
+  state.bypassed = Boolean(result.espBypassed)
+  state.connected = Boolean(result.user && (result.espBypassed || result.deviceVerified))
+  state.connectionError = false
+  state.connection = state.bypassed
+    ? 'Testing mode: ESP32 check bypassed.'
+    : state.connected
+      ? 'ESP32 is responding.'
+      : ''
 }
 function switchAuth(view) { state.view=view; state.message=''; state.info=false; render() }
 function updateValue(name,value) { state[name]=value }
@@ -120,7 +135,7 @@ function attachEvents() {
   document.querySelector('#login-form')?.addEventListener('submit',e=>{
     e.preventDefault();withPending(async()=>{
       const result=await api('/auth/login',{method:'POST',body:{email:state.email,password:state.password}})
-      state.user=result.user;state.password='';navigate('/dashboard')
+      applyAuthSession(result);state.password='';navigate('/dashboard')
     })
   })
   document.querySelector('#signup-form')?.addEventListener('submit',e=>{
@@ -150,25 +165,40 @@ function attachEvents() {
   document.querySelector('#password-form')?.addEventListener('submit',e=>{
     e.preventDefault();withPending(async()=>{
       const result=await api('/auth/finish',{method:'POST',body:{password:state.password}})
-      state.user=result.user;state.password='';navigate('/dashboard')
+      applyAuthSession(result);state.password='';navigate('/dashboard')
     })
   })
   document.querySelector('#toggle-menu')?.addEventListener('click',()=>{state.menu=!state.menu;render()})
   document.querySelectorAll('[data-link]').forEach(el=>el.addEventListener('click',e=>{e.preventDefault();navigate(el.getAttribute('href'))}))
   document.querySelectorAll('[data-logout]').forEach(el=>el.addEventListener('click',()=>withPending(async()=>{
-    await api('/auth/logout',{method:'POST'});state.user=null;state.view='login';state.email='';state.password='';state.menu=false;state.connected=false;state.connection='';navigate('/')
+    await api('/auth/logout',{method:'POST'});state.user=null;state.view='login';state.email='';state.password='';state.menu=false;state.connected=false;state.bypassed=false;state.connection='';state.connectionError=false;navigate('/')
   })))
   document.querySelector('#connect-btn')?.addEventListener('click',()=>withPending(async()=>{
-    const result=await api('/device/status')
-    if(result.connected){state.connected=true;state.connection='';navigate('/device')}
-    else{state.connection=result.message;state.connectionError=true}
+    try {
+      const result=await api('/device/status')
+      if(result.connected){
+        state.connected=true
+        state.bypassed=Boolean(result.bypassed)
+        state.connection=result.message || 'ESP32 is responding.'
+        state.connectionError=false
+      } else {
+        state.connection=result.message
+        state.connectionError=true
+      }
+    } catch (error) {
+      state.connection=error.message || 'Could not check device status.'
+      state.connectionError=true
+    }
   }))
+  document.querySelector('#start-session-btn')?.addEventListener('click',()=>{
+    window.location.assign('/session/')
+  })
 }
 window.addEventListener('popstate',()=>render())
 ;(async()=>{
   try {
     const result=await api('/me')
-    state.user=result.user
+    applyAuthSession(result)
     if(state.user&&location.pathname==='/progress'){
       const progress=await api('/progress');state.progress=progress.sessions
     }

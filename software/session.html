@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#171715" />
   <title>Cycling Dashboard</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="session.css" />
 </head>
 <body>
   <main class="dashboard" id="dashboard">
@@ -110,9 +110,10 @@
       <strong>Ride controls</strong>
       <button id="demoToggle" type="button">Pause demo data</button>
       <button id="fullscreenButton" type="button">Enter fullscreen</button>
-      <p>Connect your ESP32 WebSocket in <code>app.js</code>.</p>
+      <button id="backDashboardButton" type="button" hidden>Back to dashboard</button>
+      <p>Connect your ESP32 WebSocket in <code>session.js</code>.</p>
     </div>
   </main>
-  <script src="app.js"></script>
+  <script src="session.js"></script>
 </body>
 </html>
