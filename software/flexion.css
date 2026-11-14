@@ -1,0 +1,986 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
+
+:root {
+  --ink: #101311;
+  --green: #475e0d;
+  --sage: #94a688;
+  --pale: #dfecc7;
+  --pale-hover: #cddfad;
+  --line: #e3e6df;
+  --panel-border: #dfe8d8;
+  --panel-bg: #f7f9f5;
+  --muted: #6d7c70;
+  --auth: #172d24;
+  --cream: #fffefa;
+  --warm-pill: #f7e7c4;
+  --danger-bg: #fff1e9;
+  --danger-ink: #8c4530;
+  --font: 'DM Sans', Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background: #ffffff;
+  font-family: var(--font);
+}
+
+button, input { font: inherit; }
+button { cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+a { color: inherit; text-decoration: none; }
+
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid #a9c17c;
+  outline-offset: 3px;
+}
+
+[hidden] { display: none !important; }
+
+/* Header matching DOULA site-header */
+.site-header {
+  width: 100%;
+  height: 88px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 max(3%, 30px);
+  background: #ffffff;
+  border-bottom: 1px solid #f0f2ec;
+  position: relative;
+  z-index: 20;
+}
+
+.site-logo {
+  font-family: Arial, sans-serif;
+  font-size: 29px;
+  font-weight: 800;
+  letter-spacing: -1.7px;
+  color: #070707;
+}
+
+.nav-list {
+  display: flex;
+  align-items: center;
+  gap: 30px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nav-list a {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.nav-list a:hover,
+.nav-list .active {
+  color: var(--green);
+}
+
+.header-pill-btn {
+  background: var(--green);
+  color: #ffffff;
+  border: 0;
+  border-radius: 999px;
+  padding: 15px 22px;
+  font-weight: 700;
+  font-size: 13px;
+  white-space: nowrap;
+  transition: background-color 0.18s ease;
+}
+
+.header-pill-btn:hover {
+  background: #34470a;
+}
+
+.hamburger {
+  display: none;
+  background: transparent;
+  border: 0;
+  font-size: 27px;
+  color: #111111;
+  line-height: 1;
+  padding: 9px;
+}
+
+.mobile-nav-drawer {
+  display: none;
+}
+
+/* Main container matching .inner-page */
+.flexion-main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 48px 24px 96px;
+}
+
+.inner-eyebrow {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--green);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.inner-title {
+  font-family: Georgia, 'Times New Roman', serif;
+  letter-spacing: -0.055em;
+  line-height: 1.04;
+  font-weight: 400;
+  font-size: clamp(42px, 6.2vw, 78px);
+  margin: 14px 0 16px;
+  color: #000000;
+}
+
+.inner-description {
+  font-size: 16px;
+  color: var(--muted);
+  line-height: 1.65;
+  max-width: 680px;
+  margin: 0 0 34px;
+}
+
+/* Stage 1: Mode Selection Grid */
+.section-label {
+  font-family: monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--green);
+  margin-bottom: 14px;
+  font-weight: 700;
+}
+
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-bottom: 26px;
+}
+
+.mode-card {
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 14px;
+  background: var(--panel-bg);
+  border: 1.5px solid var(--panel-border);
+  border-radius: 22px;
+  padding: 24px;
+  color: var(--ink);
+  transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mode-card:hover {
+  border-color: var(--sage);
+  transform: translateY(-2px);
+}
+
+.mode-card.selected {
+  background: var(--cream);
+  border-color: var(--auth);
+  border-width: 2px;
+  box-shadow: 0 18px 46px rgba(23, 45, 36, 0.1);
+}
+
+.mode-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.role-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 11px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.role-pill.support {
+  background: var(--warm-pill);
+  color: var(--auth);
+}
+
+.role-pill.resistance {
+  background: var(--pale);
+  color: var(--green);
+}
+
+.selected-check {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--auth);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.mode-card.selected .selected-check {
+  opacity: 1;
+}
+
+.mode-title {
+  margin: 6px 0 4px;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-weight: 400;
+  font-size: 28px;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.mode-sub {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--green);
+  margin: 0 0 10px;
+}
+
+.mode-desc {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.curve-preview {
+  width: 100%;
+  height: 52px;
+  background: #ffffff;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 6px 10px;
+}
+
+.curve-preview svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.mode-meta {
+  padding-top: 12px;
+  border-top: 1px solid var(--panel-border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--auth);
+}
+
+/* Reps Configuration Surface Panel */
+.surface-panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 24px;
+  padding: 28px;
+  margin-bottom: 28px;
+}
+
+.reps-panel {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 28px;
+  align-items: center;
+}
+
+.reps-panel h2 {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 32px;
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  margin: 6px 0 12px;
+}
+
+.therapist-suggestion {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  background: #eef5e8;
+  border: 1px solid #d5e4c6;
+  border-radius: 16px;
+  padding: 12px 16px;
+  font-size: 13px;
+  color: #354c19;
+}
+
+.therapist-suggestion strong {
+  color: var(--auth);
+}
+
+.use-suggested-btn {
+  border: 0;
+  background: var(--pale);
+  color: #0a0c0a;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 13px;
+  border-radius: 999px;
+  transition: background-color 0.18s ease;
+}
+
+.use-suggested-btn:hover {
+  background: var(--pale-hover);
+}
+
+.reps-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: flex-end;
+}
+
+.rep-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.rep-preset-btn {
+  position: relative;
+  border: 1px solid var(--panel-border);
+  background: #ffffff;
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 9px 15px;
+  font-size: 13px;
+  font-weight: 700;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.rep-preset-btn:hover {
+  border-color: var(--sage);
+}
+
+.rep-preset-btn.active {
+  background: var(--auth);
+  border-color: var(--auth);
+  color: #ffffff;
+}
+
+.rep-preset-btn.is-suggested::after {
+  content: ' · Rec';
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--green);
+}
+
+.rep-preset-btn.active.is-suggested::after {
+  color: var(--pale);
+}
+
+.rep-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  background: #ffffff;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  padding: 8px 10px;
+}
+
+.circle-step-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--pale);
+  color: #0a0c0a;
+  font-size: 20px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  transition: background-color 0.18s ease, transform 0.12s ease;
+}
+
+.circle-step-btn:hover:not(:disabled) {
+  background: var(--pale-hover);
+}
+
+.circle-step-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.rep-value-box {
+  min-width: 96px;
+  text-align: center;
+}
+
+.rep-value-box strong {
+  display: block;
+  font-family: var(--font);
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.rep-value-box span {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Action Footer */
+.setup-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.setup-summary {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.setup-summary strong {
+  color: var(--ink);
+}
+
+.connect-btn {
+  min-width: 170px;
+  background: var(--pale);
+  border: 0;
+  border-radius: 999px;
+  padding: 16px 28px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0a0c0a;
+  transition: background-color 0.18s ease;
+}
+
+.connect-btn:hover:not(:disabled) {
+  background: var(--pale-hover);
+}
+
+.primary-pill-btn {
+  background: var(--auth);
+  color: #ffffff;
+  border: 0;
+  border-radius: 999px;
+  padding: 16px 28px;
+  font-size: 14px;
+  font-weight: 700;
+  transition: background-color 0.18s ease;
+}
+
+.primary-pill-btn:hover:not(:disabled) {
+  background: #244433;
+}
+
+.secondary-pill-btn {
+  background: #ffffff;
+  color: var(--auth);
+  border: 1px solid #d4ddd3;
+  border-radius: 999px;
+  padding: 13px 22px;
+  font-size: 13px;
+  font-weight: 700;
+  transition: background-color 0.18s ease;
+}
+
+.secondary-pill-btn:hover:not(:disabled) {
+  background: #f4f7f1;
+}
+
+/* Stage 2: Active Workout View */
+.active-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.status-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.pill-status {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: #e6f1d6;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pill-status.mode-tag {
+  background: var(--auth);
+  color: var(--pale);
+}
+
+.pill-status.warn {
+  background: var(--warm-pill);
+  color: var(--auth);
+}
+
+.pill-status.error {
+  background: var(--danger-bg);
+  color: var(--danger-ink);
+}
+
+.workout-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 22px;
+  margin-bottom: 24px;
+}
+
+/* Left Card: Rep Countdown */
+.countdown-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 28px;
+  padding: 26px 24px;
+  overflow: hidden;
+}
+
+.countdown-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 10px;
+  background: var(--sage);
+}
+
+.countdown-center {
+  text-align: center;
+  padding: 14px 0 14px;
+}
+
+.countdown-number {
+  font-family: var(--font);
+  font-size: clamp(72px, 9.5vw, 112px);
+  line-height: 0.95;
+  letter-spacing: -0.05em;
+  color: var(--auth);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.countdown-caption {
+  margin-top: 10px;
+  font-size: 15px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.countdown-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.progress-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: #e3e8dd;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: var(--green);
+  transition: width 0.35s ease;
+}
+
+.rep-test-controls {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px dashed #d3dccb;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.rep-test-label {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.rep-test-btns {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mini-pill-btn {
+  border: 1px solid #d4ddd3;
+  background: #ffffff;
+  color: var(--auth);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mini-pill-btn:hover:not(:disabled) {
+  background: #eef4ed;
+}
+
+.session-complete-banner {
+  margin-top: 18px;
+  background: #eef5e8;
+  border: 1px solid #c9deb5;
+  border-radius: 18px;
+  padding: 16px;
+  text-align: center;
+}
+
+.session-complete-banner strong {
+  display: block;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 24px;
+  font-weight: 400;
+  color: var(--auth);
+  margin-bottom: 6px;
+}
+
+.session-complete-banner p {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Right Card: Torque Value Odometer + +/- ESP Control */
+.odometer-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background: var(--cream);
+  border: 1.5px solid var(--panel-border);
+  border-radius: 28px;
+  padding: 26px 24px;
+  box-shadow: 0 22px 60px rgba(40, 68, 45, 0.08);
+}
+
+.odometer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.odometer-source-tag {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--muted);
+  background: #f2f5ee;
+  padding: 5px 10px;
+  border-radius: 999px;
+}
+
+.odometer-wrap {
+  position: relative;
+  width: min(100%, 300px);
+  margin: 12px auto 6px;
+  aspect-ratio: 260 / 215;
+}
+
+.odometer-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+
+.odo-ticks line {
+  stroke: var(--sage);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  opacity: 0.7;
+}
+
+.odo-ticks line.major {
+  stroke: var(--auth);
+  stroke-width: 2;
+  opacity: 0.85;
+}
+
+.odo-track {
+  fill: none;
+  stroke: #e3e6df;
+  stroke-width: 11;
+  stroke-linecap: round;
+}
+
+.odo-progress {
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 11.5;
+  stroke-linecap: round;
+  stroke-dasharray: 1000;
+  stroke-dashoffset: 1000;
+  transition: stroke 0.2s ease;
+}
+
+.odo-progress.support-arc {
+  stroke: var(--auth);
+}
+
+.odo-target-marker {
+  fill: var(--warm-pill);
+  stroke: var(--auth);
+  stroke-width: 2.5;
+}
+
+.odometer-readout {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding-top: 14px;
+  pointer-events: none;
+  text-align: center;
+}
+
+.odometer-value {
+  font-family: var(--font);
+  font-size: clamp(42px, 5.5vw, 56px);
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.odometer-unit {
+  font-family: monospace;
+  font-size: 13px;
+  color: var(--green);
+  margin-top: 6px;
+  font-weight: 700;
+}
+
+.odometer-role {
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.odo-scale-min,
+.odo-scale-max {
+  position: absolute;
+  bottom: 10px;
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.odo-scale-min { left: 42px; }
+.odo-scale-max { right: 36px; }
+
+/* +/- Torque Control Bar */
+.torque-control-box {
+  margin-top: 12px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 22px;
+  padding: 14px 18px;
+}
+
+.torque-control-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.torque-step-btn {
+  width: 54px;
+  height: 54px;
+  flex: none;
+  border-radius: 50%;
+  border: 0;
+  background: var(--pale);
+  color: #0a0c0a;
+  font-size: 24px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  transition: background-color 0.16s ease, transform 0.12s ease;
+}
+
+.torque-step-btn:hover:not(:disabled) {
+  background: var(--pale-hover);
+}
+
+.torque-step-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.torque-target-center {
+  text-align: center;
+}
+
+.torque-target-center span {
+  display: block;
+  font-family: monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--green);
+}
+
+.torque-target-center strong {
+  display: block;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--auth);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.esp-cmd-status {
+  margin: 10px 0 0;
+  text-align: center;
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.workout-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workout-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.hard-stop-btn {
+  border: 1px solid #f0c9b7;
+  background: var(--danger-bg);
+  color: var(--danger-ink);
+  border-radius: 999px;
+  padding: 13px 22px;
+  font-size: 13px;
+  font-weight: 700;
+  transition: background-color 0.18s ease;
+}
+
+.hard-stop-btn:hover {
+  background: #ffe3d4;
+}
+
+@media (max-width: 880px) {
+  .mode-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .reps-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .reps-controls {
+    align-items: flex-start;
+  }
+
+  .rep-presets {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 740px) {
+  .workout-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .site-header {
+    height: 79px;
+    border-radius: 0 0 20px 20px;
+    box-shadow: 0 2px 5px #0000000d;
+    padding: 0 20px;
+  }
+
+  .site-logo {
+    font-size: 28px;
+    font-weight: 500;
+    letter-spacing: -1.5px;
+  }
+
+  .hamburger {
+    display: block;
+  }
+
+  .desktop-nav,
+  .header-pill-btn {
+    display: none;
+  }
+
+  .mobile-nav-drawer.open {
+    display: flex;
+    flex-direction: column;
+    position: absolute;
+    top: 79px;
+    left: 0;
+    right: 0;
+    padding: 10px 22px 18px;
+    background: #ffffff;
+    box-shadow: 0 12px 14px #00000012;
+  }
+
+  .mobile-nav-drawer a {
+    display: block;
+    padding: 14px 6px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .flexion-main {
+    padding: 34px 16px 72px;
+  }
+
+  .countdown-card,
+  .odometer-card,
+  .surface-panel {
+    padding: 22px 18px;
+  }
+}

@@ -172,6 +172,15 @@ export async function createAppServer(options = {}) {
           if (result.connected) verifiedSessions.add(token)
           return json(res, 200, { ok: true, bypassed: false, ...result })
         }
+        if (method === 'GET' && pathname === '/api/device/config') {
+          if (!user) return json(res, 401, { ok: false, message: 'Please log in.' })
+          return json(res, 200, {
+            ok: true,
+            bypassEsp: config.bypassEsp,
+            wsUrl: config.ws,
+            deviceVerified: config.bypassEsp || verifiedSessions.has(token),
+          })
+        }
         if (method === 'GET' && pathname === '/api/progress') {
           if (!user) return json(res, 401, { ok: false, message: 'Please log in.' })
           return json(res, 200, { ok: true, sessions: store.getProgress(user.id) })
@@ -179,11 +188,17 @@ export async function createAppServer(options = {}) {
         return json(res, 404, { ok: false, message: 'API route not found.' })
       }
 
-      // Chain the session page from ../software once logged in and ESP is verified or bypassed.
+      // Chain the session selector, cycling dashboard, and flexion/extension pages from ../software.
       if (pathname === '/session' || pathname.startsWith('/session/')) {
         const token = parseCookies(req).doula_session
         const user = store.getSession(token)
-        const isEntry = pathname === '/session' || pathname === '/session/'
+        const sessionEntryFiles = {
+          '/session/': 'session-select.html',
+          '/session/cycling/': 'session.html',
+          '/session/flexion/': 'flexion.html',
+        }
+        const sessionRedirects = ['/session', '/session/cycling', '/session/flexion']
+        const isEntry = Boolean(sessionEntryFiles[pathname]) || sessionRedirects.includes(pathname)
         if (!user) {
           if (isEntry) { res.writeHead(302, { Location: '/' }); return res.end() }
           return json(res, 401, { ok: false, message: 'Please log in.' })
@@ -192,11 +207,18 @@ export async function createAppServer(options = {}) {
           if (isEntry) { res.writeHead(302, { Location: '/dashboard' }); return res.end() }
           return json(res, 403, { ok: false, message: 'Please connect the ESP32 device first.' })
         }
-        if (pathname === '/session') {
-          res.writeHead(302, { Location: '/session/' })
+        if (sessionRedirects.includes(pathname)) {
+          res.writeHead(302, { Location: `${pathname}/` })
           return res.end()
         }
-        const relPath = pathname === '/session/' ? 'session.html' : pathname.slice('/session/'.length)
+        const entryFile = sessionEntryFiles[pathname]
+        const relPath = entryFile
+          ? entryFile
+          : pathname.startsWith('/session/cycling/')
+            ? pathname.slice('/session/cycling/'.length)
+            : pathname.startsWith('/session/flexion/')
+              ? pathname.slice('/session/flexion/'.length)
+              : pathname.slice('/session/'.length)
         return await serveStatic(res, softwareDir, relPath)
       }
 

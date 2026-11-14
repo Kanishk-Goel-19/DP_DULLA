@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#ffffff" />
+    <title>DOULA | Flexion &amp; Extension</title>
+    <link rel="stylesheet" href="flexion.css" />
+    <script defer src="flexion.js"></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="site-logo" href="/dashboard">DOULA</a>
+      <nav class="desktop-nav" aria-label="Session navigation">
+        <ul class="nav-list">
+          <li><a href="/dashboard">Dashboard</a></li>
+          <li><a href="/session/">Switch Session</a></li>
+          <li><a href="/session/flexion/" class="active">Flexion &amp; Extension</a></li>
+        </ul>
+      </nav>
+      <a class="header-pill-btn" href="/session/">Switch Session</a>
+      <button class="hamburger" id="menuToggleBtn" type="button" aria-label="Toggle menu" aria-expanded="false">☰</button>
+      <nav class="mobile-nav-drawer" id="mobileNavDrawer" aria-label="Mobile session navigation">
+        <a href="/dashboard">Dashboard</a>
+        <a href="/session/">Switch Session</a>
+        <a href="/session/cycling/">Cycling Session</a>
+      </nav>
+    </header>
+
+    <main class="flexion-main">
+      <!-- STEP 1: Mode & Rep Configuration -->
+      <section id="setupView" aria-label="Flexion and extension setup">
+        <div class="inner-eyebrow">DOULA · Top-Hub Knee Module</div>
+        <h1 class="inner-title">Flexion &amp; Extension</h1>
+        <p class="inner-description">Select your training mode and set your target repetitions before beginning.</p>
+
+        <div class="section-label">1. Choose Training Mode</div>
+        <div class="mode-grid" role="radiogroup" aria-label="Training mode">
+          <button class="mode-card" type="button" data-mode="passive" role="radio" aria-checked="false">
+            <div>
+              <div class="mode-card-top">
+                <span class="role-pill support">Support Torque</span>
+                <span class="selected-check">Selected ✓</span>
+              </div>
+              <h2 class="mode-title">Passive Assist</h2>
+              <p class="mode-sub">Motor-assisted CPM motion</p>
+              <p class="mode-desc">Gently guides knee flexion and extension with adjustable motor support torque.</p>
+            </div>
+            <div class="curve-preview" aria-hidden="true">
+              <svg viewBox="0 0 200 40">
+                <path d="M8 22 H192" stroke="#dfe8d8" stroke-width="1.5" stroke-dasharray="4 4" fill="none" />
+                <path d="M8 28 C45 28, 60 14, 100 14 C140 14, 155 28, 192 28" stroke="#172d24" stroke-width="2.5" fill="none" stroke-linecap="round" />
+              </svg>
+            </div>
+            <div class="mode-meta">Suggested: 15 reps · Support 4–25 N·m</div>
+          </button>
+
+          <button class="mode-card selected" type="button" data-mode="isotonic" role="radio" aria-checked="true">
+            <div>
+              <div class="mode-card-top">
+                <span class="role-pill resistance">Resistance Torque</span>
+                <span class="selected-check">Selected ✓</span>
+              </div>
+              <h2 class="mode-title">Isotonic Mode</h2>
+              <p class="mode-sub">Physiological curve-shaped isotonic</p>
+              <p class="mode-desc">Angle-mapped resistance peaking mid-arc with ACL-safe terminal extension taper.</p>
+            </div>
+            <div class="curve-preview" aria-hidden="true">
+              <svg viewBox="0 0 200 40">
+                <path d="M8 32 H192" stroke="#dfe8d8" stroke-width="1.5" stroke-dasharray="4 4" fill="none" />
+                <path d="M8 31 C40 31, 68 8, 105 8 C142 8, 165 25, 192 29" stroke="#475e0d" stroke-width="2.5" fill="none" stroke-linecap="round" />
+              </svg>
+            </div>
+            <div class="mode-meta">Suggested: 12 reps · Resistance 5–68 N·m</div>
+          </button>
+
+          <button class="mode-card" type="button" data-mode="isokinetic" role="radio" aria-checked="false">
+            <div>
+              <div class="mode-card-top">
+                <span class="role-pill resistance">Resistance Torque</span>
+                <span class="selected-check">Selected ✓</span>
+              </div>
+              <h2 class="mode-title">Isokinetic Mode</h2>
+              <p class="mode-sub">Constant-velocity accommodating</p>
+              <p class="mode-desc">Dynamically matches your muscular push while capping peak speed through each rep.</p>
+            </div>
+            <div class="curve-preview" aria-hidden="true">
+              <svg viewBox="0 0 200 40">
+                <path d="M8 32 H192" stroke="#dfe8d8" stroke-width="1.5" stroke-dasharray="4 4" fill="none" />
+                <path d="M8 30 L32 13 H168 L192 30" stroke="#475e0d" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </div>
+            <div class="mode-meta">Suggested: 10 reps · Resistance 10–68 N·m</div>
+          </button>
+        </div>
+
+        <div class="section-label">2. Choose Number of Repetitions</div>
+        <section class="surface-panel reps-panel" aria-label="Repetition count configuration">
+          <div>
+            <h2>How many reps?</h2>
+            <div class="therapist-suggestion" id="therapistSuggestionBox">
+              <span>Therapist suggested for <strong id="suggestedModeName">Isotonic Mode</strong>: <strong id="suggestedRepCount">12 reps</strong></span>
+              <button class="use-suggested-btn" id="useSuggestedBtn" type="button">Use suggested</button>
+            </div>
+          </div>
+
+          <div class="reps-controls">
+            <div class="rep-presets" id="repPresets" aria-label="Quick rep count presets"></div>
+            <div class="rep-stepper">
+              <button class="circle-step-btn" id="repMinusBtn" type="button" aria-label="Decrease repetitions">−</button>
+              <div class="rep-value-box">
+                <strong id="repTargetDisplay">12</strong>
+                <span>TARGET REPS</span>
+              </div>
+              <button class="circle-step-btn" id="repPlusBtn" type="button" aria-label="Increase repetitions">+</button>
+            </div>
+          </div>
+        </section>
+
+        <div class="setup-footer">
+          <div class="setup-summary" id="setupSummary"></div>
+          <button class="connect-btn" id="startWorkoutBtn" type="button">Start Session <span aria-hidden="true">→</span></button>
+        </div>
+      </section>
+
+      <!-- STEP 2: Live Flexion & Extension Session -->
+      <section id="activeView" aria-label="Active flexion and extension session" hidden>
+        <div class="active-topbar">
+          <div class="status-pills">
+            <span class="pill-status mode-tag" id="activeModePill">Physiological Curve-Shaped Isotonic</span>
+            <span class="pill-status" id="espStatusPill">● Connecting…</span>
+          </div>
+          <button class="secondary-pill-btn" id="backToSetupBtn" type="button">← Change Mode / Reps</button>
+        </div>
+
+        <div class="workout-grid">
+          <!-- Rep Countdown -->
+          <article class="countdown-card" aria-label="Repetition countdown">
+            <div>
+              <div class="section-label">Repetition Countdown</div>
+              <div class="countdown-center">
+                <div class="countdown-number" id="repsRemainingValue">12</div>
+                <div class="countdown-caption" id="repsRemainingCaption">reps remaining</div>
+              </div>
+            </div>
+
+            <div>
+              <div class="countdown-meta">
+                <span id="repsProgressText">0 / 12 completed</span>
+                <span id="activeSuggestedTag">Therapist suggested: 12 reps</span>
+              </div>
+              <div class="progress-track" aria-hidden="true">
+                <div class="progress-fill" id="repProgressFill"></div>
+              </div>
+
+              <div class="session-complete-banner" id="sessionCompleteBanner" hidden>
+                <strong>Session Complete</strong>
+                <p>All target repetitions have been completed safely.</p>
+                <div class="rep-test-btns" style="justify-content:center;">
+                  <button class="connect-btn" id="repeatSessionBtn" type="button" style="min-width:140px;padding:12px 20px;">Repeat Session</button>
+                  <button class="secondary-pill-btn" id="chooseAnotherModeBtn" type="button">Change Mode</button>
+                </div>
+              </div>
+
+              <div class="rep-test-controls" id="repTestControls">
+                <span class="rep-test-label">ESP TEST SIMULATOR</span>
+                <div class="rep-test-btns">
+                  <button class="mini-pill-btn" id="simRepBtn" type="button">+1 Rep Completed</button>
+                  <button class="mini-pill-btn" id="autoSimToggleBtn" type="button">Pause Auto Demo</button>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <!-- Torque Value Odometer + +/- Control -->
+          <article class="odometer-card" aria-label="Torque odometer and control">
+            <div class="odometer-header">
+              <div class="section-label" id="torqueRoleEyebrow" style="margin-bottom:0;">Resistance Torque · ESP</div>
+              <span class="odometer-source-tag" id="torqueSourceTag">Live ESP Stream</span>
+            </div>
+
+            <div class="odometer-wrap">
+              <svg class="odometer-svg" viewBox="0 0 260 220" aria-hidden="true">
+                <g class="odo-ticks" id="odoTicks"></g>
+                <path class="odo-track" d="M 64.95 190.05 A 92 92 0 1 1 195.05 190.05" pathLength="1000" />
+                <path class="odo-progress" id="odoProgress" d="M 64.95 190.05 A 92 92 0 1 1 195.05 190.05" pathLength="1000" />
+                <circle class="odo-target-marker" id="odoTargetMarker" cx="130" cy="33" r="6" />
+              </svg>
+              <div class="odometer-readout">
+                <span class="odometer-value" id="torqueValue">0.0</span>
+                <span class="odometer-unit">N·m</span>
+                <span class="odometer-role" id="torqueOdometerLabel">Resistance Torque</span>
+              </div>
+              <span class="odo-scale-min">0</span>
+              <span class="odo-scale-max" id="odoMaxLabel">68</span>
+            </div>
+
+            <div class="torque-control-box">
+              <div class="torque-control-row">
+                <button class="torque-step-btn" id="torqueMinusBtn" type="button" aria-label="Decrease torque">−</button>
+                <div class="torque-target-center">
+                  <span id="setpointLabel">Resistance Target → ESP</span>
+                  <strong id="targetTorqueValue">25 N·m</strong>
+                </div>
+                <button class="torque-step-btn" id="torquePlusBtn" type="button" aria-label="Increase torque">+</button>
+              </div>
+              <p class="esp-cmd-status" id="espCommandStatus" role="status">Ready to send torque adjustments to ESP.</p>
+            </div>
+          </article>
+        </div>
+
+        <div class="workout-footer">
+          <div class="workout-footer-actions">
+            <button class="secondary-pill-btn" id="pauseSessionBtn" type="button">Pause Session</button>
+            <button class="secondary-pill-btn" id="endSessionBtn" type="button">End Session</button>
+          </div>
+          <button class="hard-stop-btn" id="hardStopBtn" type="button">Hard Stop</button>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

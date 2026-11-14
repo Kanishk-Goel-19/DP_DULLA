@@ -42,7 +42,7 @@ async function createLoggedInCookie(baseUrl, store, email = 'patient@gmail.com',
   return { sessionCookie, finishData: await finishRes.json() }
 }
 
-test('bypass mode marks ESP bypassed and serves ../software session page', async () => {
+test('bypass mode serves session chooser, cycling page, and flexion/extension page', async () => {
   const dataDir = await mkdtemp(path.join(testsDir, '.tmp-bypass-'))
   const { server, store } = await createAppServer({ dataDir, bypassEsp: true })
   const baseUrl = await listen(server)
@@ -50,6 +50,13 @@ test('bypass mode marks ESP bypassed and serves ../software session page', async
     const unauthSession = await fetch(`${baseUrl}/session/`, { redirect: 'manual' })
     assert.equal(unauthSession.status, 302)
     assert.equal(unauthSession.headers.get('location'), '/')
+
+    const unauthFlexion = await fetch(`${baseUrl}/session/flexion/`, { redirect: 'manual' })
+    assert.equal(unauthFlexion.status, 302)
+    assert.equal(unauthFlexion.headers.get('location'), '/')
+
+    const unauthConfig = await fetch(`${baseUrl}/api/device/config`)
+    assert.equal(unauthConfig.status, 401)
 
     const { sessionCookie, finishData } = await createLoggedInCookie(baseUrl, store)
     assert.equal(finishData.espBypassed, true)
@@ -60,30 +67,76 @@ test('bypass mode marks ESP bypassed and serves ../software session page', async
     assert.equal(me.espBypassed, true)
     assert.equal(me.deviceVerified, true)
 
+    const cfgRes = await fetch(`${baseUrl}/api/device/config`, { headers: { Cookie: sessionCookie } })
+    assert.equal(cfgRes.status, 200)
+    const cfg = await cfgRes.json()
+    assert.equal(cfg.bypassEsp, true)
+    assert.equal(cfg.deviceVerified, true)
+
     const statusRes = await fetch(`${baseUrl}/api/device/status`, { headers: { Cookie: sessionCookie } })
     const status = await statusRes.json()
     assert.equal(status.connected, true)
     assert.equal(status.bypassed, true)
 
+    // /session -> /session/ (session chooser)
     const redirectSession = await fetch(`${baseUrl}/session`, { headers: { Cookie: sessionCookie }, redirect: 'manual' })
     assert.equal(redirectSession.status, 302)
     assert.equal(redirectSession.headers.get('location'), '/session/')
 
-    const htmlRes = await fetch(`${baseUrl}/session/`, { headers: { Cookie: sessionCookie } })
-    assert.equal(htmlRes.status, 200)
-    assert.match(htmlRes.headers.get('content-type'), /^text\/html/)
-    const html = await htmlRes.text()
-    assert.match(html, /Cycling Dashboard/)
-    assert.match(html, /href="session\.css"/)
-    assert.match(html, /src="session\.js"/)
+    const selectRes = await fetch(`${baseUrl}/session/`, { headers: { Cookie: sessionCookie } })
+    assert.equal(selectRes.status, 200)
+    assert.match(selectRes.headers.get('content-type'), /^text\/html/)
+    const selectHtml = await selectRes.text()
+    assert.match(selectHtml, /Cycling/)
+    assert.match(selectHtml, /Flexion/)
+    assert.match(selectHtml, /href="cycling\/"/)
+    assert.match(selectHtml, /href="flexion\/"/)
 
-    const cssRes = await fetch(`${baseUrl}/session/session.css`, { headers: { Cookie: sessionCookie } })
+    const selectCssRes = await fetch(`${baseUrl}/session/session-select.css`, { headers: { Cookie: sessionCookie } })
+    assert.equal(selectCssRes.status, 200)
+    assert.match(selectCssRes.headers.get('content-type'), /^text\/css/)
+
+    // /session/cycling -> /session/cycling/ (original cycling dashboard)
+    const redirectCycling = await fetch(`${baseUrl}/session/cycling`, { headers: { Cookie: sessionCookie }, redirect: 'manual' })
+    assert.equal(redirectCycling.status, 302)
+    assert.equal(redirectCycling.headers.get('location'), '/session/cycling/')
+
+    const cyclingRes = await fetch(`${baseUrl}/session/cycling/`, { headers: { Cookie: sessionCookie } })
+    assert.equal(cyclingRes.status, 200)
+    const cyclingHtml = await cyclingRes.text()
+    assert.match(cyclingHtml, /Cycling Dashboard/)
+    assert.match(cyclingHtml, /href="session\.css"/)
+    assert.match(cyclingHtml, /src="session\.js"/)
+
+    const cssRes = await fetch(`${baseUrl}/session/cycling/session.css`, { headers: { Cookie: sessionCookie } })
     assert.equal(cssRes.status, 200)
     assert.match(cssRes.headers.get('content-type'), /^text\/css/)
 
-    const jsRes = await fetch(`${baseUrl}/session/session.js`, { headers: { Cookie: sessionCookie } })
+    const jsRes = await fetch(`${baseUrl}/session/cycling/session.js`, { headers: { Cookie: sessionCookie } })
     assert.equal(jsRes.status, 200)
     assert.match(jsRes.headers.get('content-type'), /^text\/javascript/)
+
+    // /session/flexion -> /session/flexion/ (new flexion & extension page)
+    const redirectFlexion = await fetch(`${baseUrl}/session/flexion`, { headers: { Cookie: sessionCookie }, redirect: 'manual' })
+    assert.equal(redirectFlexion.status, 302)
+    assert.equal(redirectFlexion.headers.get('location'), '/session/flexion/')
+
+    const flexionRes = await fetch(`${baseUrl}/session/flexion/`, { headers: { Cookie: sessionCookie } })
+    assert.equal(flexionRes.status, 200)
+    const flexionHtml = await flexionRes.text()
+    assert.match(flexionHtml, /Passive Assist/)
+    assert.match(flexionHtml, /Physiological curve-shaped isotonic/)
+    assert.match(flexionHtml, /Isokinetic Mode/)
+    assert.match(flexionHtml, /href="flexion\.css"/)
+    assert.match(flexionHtml, /src="flexion\.js"/)
+
+    const flexionCssRes = await fetch(`${baseUrl}/session/flexion/flexion.css`, { headers: { Cookie: sessionCookie } })
+    assert.equal(flexionCssRes.status, 200)
+    assert.match(flexionCssRes.headers.get('content-type'), /^text\/css/)
+
+    const flexionJsRes = await fetch(`${baseUrl}/session/flexion/flexion.js`, { headers: { Cookie: sessionCookie } })
+    assert.equal(flexionJsRes.status, 200)
+    assert.match(flexionJsRes.headers.get('content-type'), /^text\/javascript/)
 
     // %2f prevents URL dot-segment normalization so serveStatic's traversal guard is directly exercised.
     const urlParts = new URL(baseUrl)
@@ -91,7 +144,7 @@ test('bypass mode marks ESP bypassed and serves ../software session page', async
       const req = http.request({
         hostname: urlParts.hostname,
         port: urlParts.port,
-        path: '/session/..%2fsoftware_new/server.mjs',
+        path: '/session/flexion/..%2fsoftware_new/server.mjs',
         headers: { Cookie: sessionCookie },
       }, res => {
         res.resume()
@@ -110,10 +163,9 @@ test('bypass mode marks ESP bypassed and serves ../software session page', async
   }
 })
 
-test('normal mode gates /session/ until ESP WebSocket check succeeds', async () => {
+test('normal mode gates /session/ routes until ESP WebSocket check succeeds', async () => {
   const dataDir = await mkdtemp(path.join(testsDir, '.tmp-normal-'))
 
-  // Minimal WebSocket echo/handshake mock representing U1 ESP_MASTER.
   const wsSockets = new Set()
   const wsMock = http.createServer()
   wsMock.on('upgrade', (req, socket) => {
@@ -138,12 +190,13 @@ test('normal mode gates /session/ until ESP WebSocket check succeeds', async () 
     assert.equal(finishData.espBypassed, false)
     assert.equal(finishData.deviceVerified, false)
 
-    // Blocked before ESP check passes.
-    const gated = await fetch(`${baseUrl}/session/`, { headers: { Cookie: sessionCookie }, redirect: 'manual' })
-    assert.equal(gated.status, 302)
-    assert.equal(gated.headers.get('location'), '/dashboard')
+    for (const route of ['/session/', '/session/cycling/', '/session/flexion/']) {
+      const gated = await fetch(`${baseUrl}${route}`, { headers: { Cookie: sessionCookie }, redirect: 'manual' })
+      assert.equal(gated.status, 302)
+      assert.equal(gated.headers.get('location'), '/dashboard')
+    }
 
-    const gatedAsset = await fetch(`${baseUrl}/session/session.css`, { headers: { Cookie: sessionCookie } })
+    const gatedAsset = await fetch(`${baseUrl}/session/flexion/flexion.css`, { headers: { Cookie: sessionCookie } })
     assert.equal(gatedAsset.status, 403)
 
     // ESP check passes against mock WebSocket server.
@@ -152,19 +205,20 @@ test('normal mode gates /session/ until ESP WebSocket check succeeds', async () 
     assert.equal(status.connected, true)
     assert.equal(status.bypassed, false)
 
-    const meRes = await fetch(`${baseUrl}/api/me`, { headers: { Cookie: sessionCookie } })
-    const me = await meRes.json()
-    assert.equal(me.espBypassed, false)
-    assert.equal(me.deviceVerified, true)
+    const cfgRes = await fetch(`${baseUrl}/api/device/config`, { headers: { Cookie: sessionCookie } })
+    const cfg = await cfgRes.json()
+    assert.equal(cfg.bypassEsp, false)
+    assert.equal(cfg.wsUrl, wsUrl)
+    assert.equal(cfg.deviceVerified, true)
 
-    // Now /session/ is unlocked.
-    const unlocked = await fetch(`${baseUrl}/session/`, { headers: { Cookie: sessionCookie } })
-    assert.equal(unlocked.status, 200)
-    assert.match(await unlocked.text(), /Cycling Dashboard/)
+    const unlockedSelect = await fetch(`${baseUrl}/session/`, { headers: { Cookie: sessionCookie } })
+    assert.equal(unlockedSelect.status, 200)
+    const unlockedFlexion = await fetch(`${baseUrl}/session/flexion/`, { headers: { Cookie: sessionCookie } })
+    assert.equal(unlockedFlexion.status, 200)
 
     // Logout revokes session verification.
     await fetch(`${baseUrl}/api/auth/logout`, { method: 'POST', headers: { Cookie: sessionCookie } })
-    const afterLogout = await fetch(`${baseUrl}/session/`, { headers: { Cookie: sessionCookie }, redirect: 'manual' })
+    const afterLogout = await fetch(`${baseUrl}/session/flexion/`, { headers: { Cookie: sessionCookie }, redirect: 'manual' })
     assert.equal(afterLogout.status, 302)
     assert.equal(afterLogout.headers.get('location'), '/')
   } finally {

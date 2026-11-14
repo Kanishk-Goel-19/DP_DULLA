@@ -212,12 +212,21 @@ $("fullscreenButton").addEventListener("click", async () => {
   }
 });
 
+const switchSessionButton = $("switchSessionButton");
 const backDashboardButton = $("backDashboardButton");
-if (backDashboardButton && window.location.pathname.startsWith("/session")) {
-  backDashboardButton.hidden = false;
-  backDashboardButton.addEventListener("click", () => {
-    window.location.assign("/dashboard");
-  });
+if (window.location.pathname.startsWith("/session")) {
+  if (switchSessionButton) {
+    switchSessionButton.hidden = false;
+    switchSessionButton.addEventListener("click", () => {
+      window.location.assign("/session/");
+    });
+  }
+  if (backDashboardButton) {
+    backDashboardButton.hidden = false;
+    backDashboardButton.addEventListener("click", () => {
+      window.location.assign("/dashboard");
+    });
+  }
 }
 
 document.querySelectorAll(".scene-option").forEach((button) => {
