@@ -1,36 +1,42 @@
 // ============================================================================
 // PROJECT DOULA — U2 (ESP_TOPHUB) INCREMENTAL STAGED FIRMWARE
-// Current Stage : STAGE 6 (Cytron MDD10A) — Self-Homing, CPM & Active Assist
+// Current Stage : STAGE 7 (Cytron MDD10A) — Clinical Modes, Safety & ESP-NOW
 // Target MCU    : ESP32-S NodeMCU V1.1 (Arduino-ESP32 v2.x / v3.x)
 // Reference     : Built from esp_tophub_circuit_test.ino (kept untouched)
 //
-// Cytron MDD10A (Rev 2.0) Specs & Stage 6 Architecture:
+// Cytron MDD10A (Rev 2.0) Specs & Stage 7 Architecture:
 //   - Single channel (M1) on GPIO25 (PWM) + GPIO26 (DIR), Sign-Magnitude mode.
 //   - 3.3V-compatible logic (V_IOH >= 3.0V), 5-30V bus, 5 kHz default PWM (20 kHz max).
 //   - 10 A continuous / 30 A peak (10s) rating: firmware enforces 10.0 A steady
 //     limit with up to 15.0 A surge budget for <= 5.0 s before foldback, plus
 //     25.0 A (500 ms) sustained overcurrent shutdown.
-//   - Bidirectional closed-loop PI+FF current control ('iref <-15..15>'),
-//     bidirectional 'dirtest', and NVS-persisted 'pol dir|enc|acs' & 'rom'.
-//   - Stage 6 adds current/stall-guarded 'autohome' (STOP1), 'goto <deg>',
-//     bilateral 'cpm', patient-triggered + yield-forward 'assist' (AAN), and
-//     per-rep [REP] torque/ROM/work telemetry.
+//   - Full clinical suite: 'autohome', 'goto', 'cpm', 'assist', 'iso', 'isok',
+//     'isom', pathology shear profiles ('path'), itemized spasm/clonus/OV safety,
+//     compliant electronic hard-stop ('lock' / 'release'), & full [REP] metrics.
+//   - Wi-Fi Channel 1 ESP-NOW link to U1 (ESP_MASTER): 50 Hz binary telemetry,
+//     event-driven rep summaries, <3 ms E-Stop, and 500 ms heartbeat watchdog.
 //   - Brake chopper defaults to CHOP_OFF (pending 5V NPN U202 driver) with
-//     27.5 V overvoltage cutoff protection.
+//     27.5 V CHOP_OFF / 28.8 V hard overvoltage protection.
 //
 // Serial Monitor: 115200 baud (NL, CR, Both NL & CR, or No line ending)
 // ============================================================================
 
 #include <Arduino.h>
+#include <WiFi.h>
+#include <esp_now.h>
+#include <esp_wifi.h>
 #include <Preferences.h>
 #include <ctype.h>
 #include <math.h>
 #include <driver/pcnt.h>
+#include <driver/gpio.h>
+#include <esp_system.h>
+#include "rehab_espnow_protocol.h"
 
 // ----------------------------------------------------------------------------
 // 0. STAGE & HARDWARE CAPABILITY FLAGS
 // ----------------------------------------------------------------------------
-static const int  FW_STAGE                    = 6;
+static const int  FW_STAGE                    = 7;
 static const bool MOTOR_BIDIRECTIONAL_ENABLED = true;  // Cytron MDD10A Sign-Magnitude FWD + REV
 
 // ----------------------------------------------------------------------------
@@ -70,8 +76,8 @@ static const int      LEDC_CH_CHOPPER    = 2;      // v2.x LEDC Timer 1 (avoids 
 
 // Verified Encoder & MY1016 + GBX1 Drivetrain Constants
 static const float    ENC_CPR_MOTOR      = 1440.0f;                 // 360 PPR * 4x quadrature
-static const float    ENC_CPR_OUTPUT     = ENC_CPR_MOTOR;           // Verified 1:1 on output shaft
-static const float    DEG_PER_COUNT      = 360.0f / ENC_CPR_OUTPUT; // 0.2500 deg/count
+static const float    ENC_CPR_OUTPUT     = ENC_CPR_MOTOR * 2.0f;    // Scaled 720 counts/rev on output shaft
+static const float    DEG_PER_COUNT      = 360.0f / ENC_CPR_OUTPUT; // 0.5000 deg/count
 static const int      VEL_WINDOW_TICKS   = 20;                      // 40 ms sliding window @ 500 Hz
 static const float    RAD_PER_DEG        = 0.0174532925f;
 static const float    DEG_PER_RAD        = 57.2957795f;
@@ -96,8 +102,9 @@ static const uint16_t HW_OVERCURRENT_MS     = 500U;    // 500 ms persistence rid
 static const uint16_t HW_OVERCURRENT_TICKS  = (uint16_t)(HW_OVERCURRENT_MS / (CONTROL_PERIOD_US / 1000U));
 static const float    MAX_SAFE_ARM_DEGS     = 330.0f;  // Overspeed cutoff (~55 RPM output)
 static const float    VBUS_CHOP_OFF_OV_V    = 27.5f;   // CHOP_OFF OV shutdown ceiling
+static const float    VBUS_ABS_OV_FAULT_V   = 28.8f;   // Unconditional HW OV fault ceiling
 
-// Stage 6 ROM, Self-Homing, CPM & Active-Assist Defaults
+// Stage 6/7 ROM, Self-Homing, CPM, Clinical & Safety Constants
 static const float    ROM_ABS_MIN_DEG        = 0.0f;
 static const float    ROM_ABS_MAX_DEG        = 120.0f;
 static const float    ROM_MIN_SPAN_DEG       = 10.0f;
@@ -111,6 +118,15 @@ static const float    DEFAULT_AST_SPEED_DEGS = 22.0f;
 static const float    ASSIST_NUDGE_TRIG_DEG  = 1.25f;   // Patient nudge displacement trigger
 static const float    ASSIST_VEL_TRIG_DEGS   = 2.5f;    // Intentional motion velocity trigger
 static const float    ASSIST_RESIST_ERR_DEG  = 12.0f;   // Resistance/spasm pause threshold
+static const float    BACKLASH_DEG_DEFAULT   = 0.65f;   // GBX1 anti-backlash engagement ramp (deg)
+static const float    DEFAULT_ISO_EXT_NM     = 18.0f;   // Default isotonic quad resistance (Nm)
+static const float    DEFAULT_ISO_FLEX_NM    = 12.0f;   // Default isotonic ham resistance (Nm)
+static const float    DEFAULT_ISOK_VEL_DEGS  = 45.0f;   // Default isokinetic velocity limit (deg/s)
+static const float    DEFAULT_ISOM_ANGLE_DEG = 60.0f;   // Default isometric lock angle (deg)
+static const float    DEFAULT_ISOM_MAX_NM    = 25.0f;   // Default isometric knee torque ceiling (Nm)
+static const float    HARDSTOP_LOCK_MAX_NM   = 22.5f;   // Compliant electronic hard-stop yield (Nm knee)
+static const uint32_t ESPNOW_TELEM_PERIOD_MS = 20U;     // 50 Hz ESP-NOW telemetry stream to U1
+static const uint32_t ESPNOW_WATCHDOG_MS     = 500U;    // 500 ms U1 heartbeat watchdog timeout
 
 static const float    VBUS_DIV_MULT         = 16.942f; // (73.333k + 4.6k) / 4.6k
 static const float    ACS712_MV_PER_AMP     = 33.0f;   // 66 mV/A * 0.50 (22k/22k divider)
@@ -120,7 +136,7 @@ static const char    *NVS_NAMESPACE         = "tophub_stg";
 // ----------------------------------------------------------------------------
 // 3. STATE MACHINE, KINEMATICS & GLOBAL STATE
 // ----------------------------------------------------------------------------
-enum OperatingMode : uint8_t {
+enum StagedMode : uint8_t {
     MODE_IDLE = 0,
     MODE_DIRECT_PWM,
     MODE_BENCH_PULSE,
@@ -131,7 +147,11 @@ enum OperatingMode : uint8_t {
     MODE_AUTOHOME,
     MODE_CPM,
     MODE_ACTIVE_ASSIST,
-    MODE_GOTO
+    MODE_GOTO,
+    MODE_ISOTONIC,
+    MODE_ISOKINETIC,
+    MODE_ISOMETRIC,
+    MODE_HARDSTOP_LOCK
 };
 
 enum ChopperMode : uint8_t {
@@ -142,7 +162,7 @@ enum ChopperMode : uint8_t {
 
 static Preferences   g_prefs;
 
-static OperatingMode g_mode                 = MODE_IDLE;
+static StagedMode    g_mode                 = MODE_IDLE;
 static int           g_cmd_motor_pct        = 0;
 static int           g_cmd_motor_dir        = 0;      // 0 = REV (LOW)
 static float         g_cmd_iref_a           = 0.0f;
@@ -304,7 +324,68 @@ static float         g_last_rep_max_tk    = 0.0f;
 static float         g_last_rep_flex_nm   = 0.0f;
 static float         g_last_rep_ext_nm    = 0.0f;
 static float         g_last_rep_work_j    = 0.0f;
+static float         g_last_rep_ang_ext   = 0.0f;
+static float         g_last_rep_ang_flex  = 0.0f;
+static float         g_last_rep_cov_pct   = 0.0f;
+static float         g_rep_ang_pk_ext     = 0.0f;
+static float         g_rep_ang_pk_flex    = 0.0f;
+static double        g_rep_vel_sum        = 0.0;
+static double        g_rep_vel_sq_sum     = 0.0;
+static uint32_t      g_rep_samples        = 0;
 static bool          g_rep_done_msg       = false;
+static TopHubRepSummaryPacket_t g_latest_rep_summary = {};
+static bool          g_rep_summary_tx_pend = false;
+
+// Stage 7 Clinical Modes, Pathology Curves, Itemized Safety & Hard-Stop State
+static uint8_t       g_pathology_profile    = PATH_STANDARD;
+static float         g_iso_ext_nm           = DEFAULT_ISO_EXT_NM;
+static float         g_iso_flex_nm          = DEFAULT_ISO_FLEX_NM;
+static float         g_isok_vel_degs        = DEFAULT_ISOK_VEL_DEGS;
+static float         g_isok_ext_cap_nm      = DEFAULT_ISO_EXT_NM;
+static float         g_isok_flex_cap_nm     = DEFAULT_ISO_FLEX_NM;
+static float         g_isom_angle_tk        = DEFAULT_ISOM_ANGLE_DEG;
+static float         g_isom_max_nm          = DEFAULT_ISOM_MAX_NM;
+static float         g_active_target_curve_nm = 0.0f;
+static float         g_last_rev_theta_m     = 60.0f;
+static int8_t        g_last_torque_sign     = 0;
+
+static bool          g_safety_spasm_en      = true;
+static bool          g_hardstop_locked      = false;
+static bool          g_spasm_latched        = false;
+static bool          g_in_spasm_backoff     = false;
+static bool          g_abs_ov_fault_latched = false;
+static bool          g_espnow_fault_lockout = false;
+static bool          g_espnow_oneshot_latched = false;
+static float         g_freeze_theta_m_deg   = 60.0f;
+static float         g_backoff_target_tk    = 45.0f;
+static float         g_prev_pad_force_n     = 0.0f;
+static uint16_t      g_residual_spike_ticks = 0;
+static int8_t        g_prev_vel_sign        = 0;
+static uint32_t      g_clonus_window_start  = 0;
+static uint8_t       g_clonus_reversals     = 0;
+static uint8_t       g_safety_msg_code      = 0; // 1=ov,2=spasm_df,3=cpm_catch,4=res,5=clonus,6=wdog,7=lock,8=rel
+static float         g_safety_msg_val       = 0.0f;
+static float         g_safety_trip_f_n      = 0.0f;
+static float         g_safety_trip_i_a      = 0.0f;
+static float         g_safety_trip_mv       = 0.0f;
+
+// Wi-Fi + ESP-NOW Link State (U2 <-> U1: ESP_MASTER on Channel 1)
+static bool          g_wifi_enabled         = true;
+static uint8_t       g_wifi_channel         = REHAB_WIFI_CHANNEL;
+static bool          g_espnow_ready         = false;
+static uint8_t       g_master_mac[6]        = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+static bool          g_master_linked        = false;
+static uint32_t      g_master_last_rx_ms    = 0;
+static bool          g_ctrl_from_espnow     = false;
+static uint16_t      g_telem_seq            = 0;
+static uint32_t      g_espnow_tx_ok         = 0;
+static uint32_t      g_espnow_tx_err        = 0;
+static uint32_t      g_espnow_rx_ok         = 0;
+static uint32_t      g_espnow_rx_bad        = 0;
+static uint8_t       g_espnow_evt_code      = 0; // 1=master_linked, 2=unhomed_reject
+static portMUX_TYPE  g_rx_mux               = portMUX_INITIALIZER_UNLOCKED;
+static RehabCommandPacket_t g_rx_staging_pkt = {};
+static volatile bool g_rx_pkt_pending       = false;
 
 static int           g_enc_a_last         = -1;
 static int           g_enc_b_last         = -1;
@@ -317,9 +398,11 @@ static uint8_t       g_cmd_len            = 0;
 // ----------------------------------------------------------------------------
 // 4. CHANGE-ONLY PWM HELPERS (Arduino-ESP32 v2.x & v3.x compatible)
 // ----------------------------------------------------------------------------
-static int32_t s_last_motor_duty   = -1;
-static int8_t  s_last_motor_dir    = -1;
-static int32_t s_last_chopper_duty = -1;
+static int32_t s_last_motor_duty      = -1;
+static int8_t  s_last_motor_dir       = -1;
+static int32_t s_last_chopper_duty    = -1;
+static bool    s_motor_pwm_attached   = false;
+static bool    s_chopper_pwm_attached = false;
 
 static inline uint32_t pctToDuty(int pct) {
     return (uint32_t)(((uint32_t)pct * PWM_MAX_DUTY) / 100U);
@@ -335,39 +418,98 @@ static inline void writeLedcOutput(int pin, int ch, uint32_t duty) {
 #endif
 }
 
-static void configureMotorPWMChannel() {
+// Reclaim GPIO25/GPIO26 from DAC/RTC mux and drive all power-stage outputs at max 40 mA strength.
+// Classic ESP32 Wi-Fi init can perturb GPIO25/26 mux state (arduino-esp32 #7980).
+static void hardenOutputPadsDigital(int dir_state) {
+    dacDisable(PIN_MD_PWM);
+    dacDisable(PIN_MD_DIR);
+
+    digitalWrite(PIN_MD_PWM, LOW);
+    pinMode(PIN_MD_PWM, OUTPUT);
+    digitalWrite(PIN_MD_DIR, dir_state ? HIGH : LOW);
+    pinMode(PIN_MD_DIR, OUTPUT);
+    digitalWrite(PIN_CHOP_PWM, LOW);
+    pinMode(PIN_CHOP_PWM, OUTPUT);
+
+    gpio_set_drive_capability((gpio_num_t)PIN_MD_PWM, GPIO_DRIVE_CAP_3);
+    gpio_set_drive_capability((gpio_num_t)PIN_MD_DIR, GPIO_DRIVE_CAP_3);
+    gpio_set_drive_capability((gpio_num_t)PIN_CHOP_PWM, GPIO_DRIVE_CAP_3);
+}
+
+// Detach LEDC when idle/zero-duty so GPIO25 is driven as a solid push-pull LOW (40 mA) instead
+// of relying on a peripheral zero-duty waveform across R15 (220 kOhm pull-down).
+static void forceOutputPadLow(int pin, int ch, bool is_dac_pad, bool *attached_flag) {
+    if (*attached_flag) {
+        writeLedcOutput(pin, ch, 0);
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
-    ledcDetach(PIN_MD_PWM);
-    ledcAttach(PIN_MD_PWM, g_md_pwm_freq_hz, PWM_RES_BITS);
+        ledcDetach(pin);
 #else
+        ledcDetachPin(pin);
+#endif
+        *attached_flag = false;
+    }
+    if (is_dac_pad) {
+        dacDisable((uint8_t)pin);
+    }
+    digitalWrite(pin, LOW);
+    pinMode(pin, OUTPUT);
+    gpio_set_drive_capability((gpio_num_t)pin, GPIO_DRIVE_CAP_3);
+}
+
+static void attachAndWriteLedc(int pin, int ch, uint32_t freq_hz, uint32_t duty,
+                               bool is_dac_pad, bool *attached_flag) {
+    if (duty == 0) {
+        forceOutputPadLow(pin, ch, is_dac_pad, attached_flag);
+        return;
+    }
+    if (!(*attached_flag)) {
+        if (is_dac_pad) {
+            dacDisable((uint8_t)pin);
+        }
+        gpio_set_drive_capability((gpio_num_t)pin, GPIO_DRIVE_CAP_3);
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+        ledcAttach(pin, freq_hz, PWM_RES_BITS);
+        ledcWrite(pin, duty);
+#else
+        ledcSetup(ch, freq_hz, PWM_RES_BITS);
+        ledcWrite(ch, 0);
+        ledcAttachPin(pin, ch);
+        ledcWrite(ch, duty);
+#endif
+        *attached_flag = true;
+        return;
+    }
+    writeLedcOutput(pin, ch, duty);
+}
+
+static void configureMotorPWMChannel(bool detach_first = true) {
+    if (detach_first || s_motor_pwm_attached) {
+        forceOutputPadLow(PIN_MD_PWM, LEDC_CH_MOTOR, true, &s_motor_pwm_attached);
+    }
+#if !(defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3))
     ledcSetup(LEDC_CH_MOTOR, g_md_pwm_freq_hz, PWM_RES_BITS);
-    ledcAttachPin(PIN_MD_PWM, LEDC_CH_MOTOR);
+    ledcWrite(LEDC_CH_MOTOR, 0);
 #endif
     s_last_motor_duty = -1;
 }
 
-static void initPWM() {
-    pinMode(PIN_MD_PWM, OUTPUT);
-    digitalWrite(PIN_MD_PWM, LOW);
-    pinMode(PIN_MD_DIR, OUTPUT);
-    digitalWrite(PIN_MD_DIR, LOW);
-    pinMode(PIN_CHOP_PWM, OUTPUT);
-    digitalWrite(PIN_CHOP_PWM, LOW);
-
-#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
-    ledcAttach(PIN_MD_PWM, g_md_pwm_freq_hz, PWM_RES_BITS);
-    ledcWrite(PIN_MD_PWM, 0);
-    ledcAttach(PIN_CHOP_PWM, CHOP_PWM_FREQ_HZ, PWM_RES_BITS);
-    ledcWrite(PIN_CHOP_PWM, 0);
-#else
-    ledcSetup(LEDC_CH_MOTOR, g_md_pwm_freq_hz, PWM_RES_BITS);
-    ledcAttachPin(PIN_MD_PWM, LEDC_CH_MOTOR);
-    ledcWrite(LEDC_CH_MOTOR, 0);
-
+static void configureChopperPWMChannel(bool detach_first = true) {
+    if (detach_first || s_chopper_pwm_attached) {
+        forceOutputPadLow(PIN_CHOP_PWM, LEDC_CH_CHOPPER, false, &s_chopper_pwm_attached);
+    }
+#if !(defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3))
     ledcSetup(LEDC_CH_CHOPPER, CHOP_PWM_FREQ_HZ, PWM_RES_BITS);
-    ledcAttachPin(PIN_CHOP_PWM, LEDC_CH_CHOPPER);
     ledcWrite(LEDC_CH_CHOPPER, 0);
 #endif
+    s_last_chopper_duty = -1;
+}
+
+static void initPWM() {
+    s_motor_pwm_attached   = false;
+    s_chopper_pwm_attached = false;
+    hardenOutputPadsDigital(0);
+    configureMotorPWMChannel(false);
+    configureChopperPWMChannel(false);
     s_last_motor_dir    = 0;
     s_last_motor_duty   = 0;
     s_last_chopper_duty = 0;
@@ -387,7 +529,8 @@ static void applyMotorFloatPct(int dir, float pct) {
         s_last_motor_dir = target_dir;
     }
     if ((int32_t)target_duty != s_last_motor_duty) {
-        writeLedcOutput(PIN_MD_PWM, LEDC_CH_MOTOR, target_duty);
+        attachAndWriteLedc(PIN_MD_PWM, LEDC_CH_MOTOR, g_md_pwm_freq_hz,
+                           target_duty, true, &s_motor_pwm_attached);
         s_last_motor_duty = (int32_t)target_duty;
     }
 
@@ -406,7 +549,8 @@ static void applyChopperFloatPct(float pct, float max_pct) {
     if (target_duty > PWM_MAX_DUTY) target_duty = PWM_MAX_DUTY;
 
     if ((int32_t)target_duty != s_last_chopper_duty) {
-        writeLedcOutput(PIN_CHOP_PWM, LEDC_CH_CHOPPER, target_duty);
+        attachAndWriteLedc(PIN_CHOP_PWM, LEDC_CH_CHOPPER, CHOP_PWM_FREQ_HZ,
+                           target_duty, false, &s_chopper_pwm_attached);
         s_last_chopper_duty = (int32_t)target_duty;
     }
     g_chopper_duty_pct = clamped;
@@ -417,23 +561,46 @@ static void applyChopperOutput(int pct) {
     applyChopperFloatPct((float)pct, (float)MAX_CHOP_MANUAL_PCT);
 }
 
+static void reclaimOutputsAfterWifi() {
+    int   restore_dir = (g_mode == MODE_IDLE) ? 0 : g_motor_dir;
+    float restore_pct = (g_mode == MODE_IDLE) ? 0.0f : g_motor_pwm_pct_f;
+    configureMotorPWMChannel(true);
+    configureChopperPWMChannel(true);
+    hardenOutputPadsDigital(restore_dir);
+    s_last_motor_dir    = -1;
+    s_last_motor_duty   = -1;
+    s_last_chopper_duty = -1;
+    applyMotorFloatPct(restore_dir, restore_pct);
+    applyChopperFloatPct(g_chopper_duty_pct, (float)MAX_CHOP_AUTO_PCT);
+}
+
 static void stopAllImmediate() {
-    g_mode               = MODE_IDLE;
-    g_cmd_motor_pct      = 0;
-    g_cmd_motor_dir      = 0;
-    g_cmd_iref_a         = 0.0f;
-    g_active_iref_a      = 0.0f;
-    g_pi_integral_v      = 0.0f;
-    g_ctrl_v_ff          = 0.0f;
-    g_ctrl_v_cmd         = 0.0f;
-    g_oc_ticks           = 0;
-    g_obst_ticks         = 0;
-    g_home_phase         = 0;
-    g_regen_clamp_sent   = false;
-    g_acs_rev_neg_cnt    = 0;
-    g_acs_pol_warn_sent  = false;
-    g_overspeed_cut_flag = false;
-    g_cmd_chop_pct       = 0;
+    g_mode                   = MODE_IDLE;
+    g_cmd_motor_pct          = 0;
+    g_cmd_motor_dir          = 0;
+    g_cmd_iref_a             = 0.0f;
+    g_active_iref_a          = 0.0f;
+    g_active_target_curve_nm = 0.0f;
+    g_pi_integral_v          = 0.0f;
+    g_ctrl_v_ff              = 0.0f;
+    g_ctrl_v_cmd             = 0.0f;
+    g_oc_ticks               = 0;
+    g_obst_ticks             = 0;
+    g_residual_spike_ticks   = 0;
+    g_clonus_reversals       = 0;
+    g_clonus_window_start    = 0;
+    g_prev_vel_sign          = 0;
+    g_last_torque_sign       = 0;
+    g_last_rev_theta_m       = g_theta_m_deg;
+    g_home_phase             = 0;
+    g_in_spasm_backoff       = false;
+    g_hardstop_locked        = false;
+    g_ctrl_from_espnow       = false;
+    g_regen_clamp_sent       = false;
+    g_acs_rev_neg_cnt        = 0;
+    g_acs_pol_warn_sent      = false;
+    g_overspeed_cut_flag     = false;
+    g_cmd_chop_pct           = 0;
     if (g_chop_mode == CHOP_MANUAL) {
         g_chop_mode = CHOP_OFF;
     }
@@ -586,6 +753,26 @@ static float readAveragedMilliVolts(int pin, int samples = 64) {
     return (float)sum / (float)samples;
 }
 
+// Fast median-of-N (N <= 5) rejects single-sample Wi-Fi TX RF & 5 kHz PWM switching glitches.
+static uint32_t readMedianMilliVolts(int pin, int count) {
+    uint32_t s[5];
+    if (count < 1) count = 1;
+    if (count > 5) count = 5;
+    for (int i = 0; i < count; ++i) {
+        s[i] = analogReadMilliVolts(pin);
+    }
+    for (int i = 1; i < count; ++i) {
+        uint32_t key = s[i];
+        int j = i - 1;
+        while (j >= 0 && s[j] > key) {
+            s[j + 1] = s[j];
+            j--;
+        }
+        s[j + 1] = key;
+    }
+    return s[count / 2];
+}
+
 static void zeroACS712BootFallback() {
     float mv = readAveragedMilliVolts(PIN_ACS712_SENSE, 64);
     if (mv >= 300.0f && mv <= 2850.0f) {
@@ -605,6 +792,10 @@ static void loadCalibrationFromNVS() {
         g_dir_polarity = +1;
         g_enc_polarity = +1;
         g_acs_polarity = +1;
+        g_rom_min_deg  = DEFAULT_ROM_MIN_DEG;
+        g_rom_max_deg  = DEFAULT_ROM_MAX_DEG;
+        g_wifi_enabled = true;
+        g_wifi_channel = REHAB_WIFI_CHANNEL;
         return;
     }
 
@@ -618,6 +809,8 @@ static void loadCalibrationFromNVS() {
     int8_t ap   = g_prefs.isKey("ap")     ? (int8_t)g_prefs.getChar("ap", 1) : 1;
     float rmin  = g_prefs.isKey("rmin")   ? g_prefs.getFloat("rmin", DEFAULT_ROM_MIN_DEG) : DEFAULT_ROM_MIN_DEG;
     float rmax  = g_prefs.isKey("rmax")   ? g_prefs.getFloat("rmax", DEFAULT_ROM_MAX_DEG) : DEFAULT_ROM_MAX_DEG;
+    bool  w_en  = g_prefs.isKey("wen")    ? g_prefs.getBool("wen", true) : true;
+    uint8_t wch = g_prefs.isKey("wch")    ? (uint8_t)g_prefs.getChar("wch", REHAB_WIFI_CHANNEL) : REHAB_WIFI_CHANNEL;
     g_prefs.end();
 
     g_acs_zero_mv  = (isfinite(v_z) && v_z >= 300.0f && v_z <= 2850.0f) ? v_z : 1250.0f;
@@ -627,6 +820,8 @@ static void loadCalibrationFromNVS() {
     g_dir_polarity = (dp == -1) ? -1 : +1;
     g_enc_polarity = (ep == -1) ? -1 : +1;
     g_acs_polarity = (ap == -1) ? -1 : +1;
+    g_wifi_enabled = w_en;
+    g_wifi_channel = (wch >= 1 && wch <= 13) ? wch : REHAB_WIFI_CHANNEL;
     if (isfinite(rmin) && isfinite(rmax) &&
         rmin >= ROM_ABS_MIN_DEG && rmax <= ROM_ABS_MAX_DEG &&
         (rmax - rmin) >= ROM_MIN_SPAN_DEG) {
@@ -653,6 +848,8 @@ static void saveCalibrationToNVS() {
     g_prefs.putChar("ap", g_acs_polarity);
     g_prefs.putFloat("rmin", g_rom_min_deg);
     g_prefs.putFloat("rmax", g_rom_max_deg);
+    g_prefs.putBool("wen", g_wifi_enabled);
+    g_prefs.putChar("wch", (int8_t)g_wifi_channel);
     g_prefs.end();
 }
 
@@ -669,16 +866,28 @@ static void clearCalibrationNVS() {
     g_acs_polarity = +1;
     g_rom_min_deg  = DEFAULT_ROM_MIN_DEG;
     g_rom_max_deg  = DEFAULT_ROM_MAX_DEG;
+    g_wifi_enabled = true;
+    g_wifi_channel = REHAB_WIFI_CHANNEL;
     g_vbus_idle_v  = 24.0f;
-    g_is_homed     = false;
     zeroACS712BootFallback();
     latchEncoderAngleDeg(mapKneeToArmAngleDeg(90.0f, g_d_offset_m, g_L_leg_m));
     g_is_homed = false;
 }
 
+static float    g_idle_peak_raw_i_a  = 0.0f;
+static float    g_idle_peak_signed_a = 0.0f;
+static uint32_t g_idle_spike_cnt     = 0;
+static uint16_t g_idle_settle_ticks  = 0;
+static float    g_idle_min_mv        = 9999.0f;
+static float    g_idle_max_mv        = 0.0f;
+static int64_t  g_idle_enc_ref       = 0;
+static int64_t  g_idle_enc_max_delta = 0;
+static const float    IDLE_SPIKE_WARN_A  = 1.50f;
+static const uint16_t IDLE_SETTLE_TICKS  = 75; // 150 ms settle ignores normal stop L/R tail
+
 static void sampleAnalogSensors500Hz() {
     g_vbus_raw_adc = (uint16_t)analogRead(PIN_VBUS_SENSE);
-    g_vbus_raw_mv  = (float)analogReadMilliVolts(PIN_VBUS_SENSE);
+    g_vbus_raw_mv  = (float)readMedianMilliVolts(PIN_VBUS_SENSE, 3);
     if (g_vbus_raw_adc >= 100 && g_vbus_raw_adc <= 3500 &&
         g_vbus_raw_mv >= 600.0f && g_vbus_raw_mv <= 2300.0f) {
         float vbus_meas = (g_vbus_raw_mv * 0.001f) * VBUS_DIV_MULT;
@@ -694,7 +903,7 @@ static void sampleAnalogSensors500Hz() {
     }
 
     g_acs_raw_adc = (uint16_t)analogRead(PIN_ACS712_SENSE);
-    g_acs_raw_mv  = (float)analogReadMilliVolts(PIN_ACS712_SENSE);
+    g_acs_raw_mv  = (float)readMedianMilliVolts(PIN_ACS712_SENSE, 5);
     if (g_acs_raw_adc >= 250 && g_acs_raw_adc <= 3900 &&
         g_acs_raw_mv >= 300.0f && g_acs_raw_mv <= 2850.0f) {
         float i_raw = ((g_acs_raw_mv - g_acs_zero_mv) / ACS712_MV_PER_AMP) * (float)g_acs_polarity;
@@ -704,6 +913,35 @@ static void sampleAnalogSensors500Hz() {
             g_motor_current_a = 0.70f * g_motor_current_a + 0.30f * i_raw;
         }
         g_acs_valid = true;
+        if (g_mode == MODE_IDLE) {
+            if (g_idle_settle_ticks < IDLE_SETTLE_TICKS) {
+                g_idle_settle_ticks++;
+                g_idle_enc_ref = g_enc_counts;
+            } else {
+                if (g_acs_raw_mv < g_idle_min_mv) g_idle_min_mv = g_acs_raw_mv;
+                if (g_acs_raw_mv > g_idle_max_mv) g_idle_max_mv = g_acs_raw_mv;
+                int64_t enc_d = g_enc_counts - g_idle_enc_ref;
+                if (enc_d < 0) enc_d = -enc_d;
+                if (enc_d > g_idle_enc_max_delta) g_idle_enc_max_delta = enc_d;
+                float abs_i = fabsf(i_raw);
+                if (abs_i >= IDLE_SPIKE_WARN_A) {
+                    g_idle_spike_cnt++;
+                    if (abs_i > g_idle_peak_raw_i_a) {
+                        g_idle_peak_raw_i_a  = abs_i;
+                        g_idle_peak_signed_a = i_raw;
+                    }
+                }
+            }
+        } else {
+            g_idle_settle_ticks  = 0;
+            g_idle_spike_cnt     = 0;
+            g_idle_peak_raw_i_a  = 0.0f;
+            g_idle_peak_signed_a = 0.0f;
+            g_idle_min_mv        = 9999.0f;
+            g_idle_max_mv        = 0.0f;
+            g_idle_enc_ref       = g_enc_counts;
+            g_idle_enc_max_delta = 0;
+        }
     } else {
         g_acs_valid       = false;
         g_motor_current_a = 0.0f;
@@ -723,10 +961,10 @@ static void printAdcDiagnostics() {
 }
 
 static void printNvsStatus() {
-    Serial.printf("[NVS] ns='%s' | cal=%d | v_zero=%.1f mV | vbus_idle=%.2f V | d_off=%.3f m | L_leg=%.3f m | dp=%+d ep=%+d ap=%+d | ROM=%.1f..%.1f deg\n",
+    Serial.printf("[NVS] ns='%s' | cal=%d | v_zero=%.1f mV | vbus_idle=%.2f V | d_off=%.3f m | L_leg=%.3f m | dp=%+d ep=%+d ap=%+d | ROM=%.1f..%.1f deg | WiFi:%s(ch%u)\n",
                   NVS_NAMESPACE, g_cal_valid ? 1 : 0, g_acs_zero_mv, g_vbus_idle_v,
                   g_d_offset_m, g_L_leg_m, g_dir_polarity, g_enc_polarity, g_acs_polarity,
-                  g_rom_min_deg, g_rom_max_deg);
+                  g_rom_min_deg, g_rom_max_deg, g_wifi_enabled ? "ON" : "OFF", (unsigned)g_wifi_channel);
 }
 
 static void printEncDiagnostics(bool show_hints = true) {
@@ -779,6 +1017,11 @@ static float computeChopperDutyForVbus(float vbus_v, float v_on, float v_max) {
 }
 
 static void updateBrakeChopper(float vbus_v) {
+    // Unconditional hardware safety dump (>28.8 V) overrides CHOP_OFF / CHOP_MANUAL
+    if (g_vbus_valid && vbus_v > VBUS_ABS_OV_FAULT_V) {
+        applyChopperFloatPct(100.0f, (float)MAX_CHOP_AUTO_PCT);
+        return;
+    }
     if (g_chop_mode == CHOP_OFF) {
         applyChopperFloatPct(0.0f, (float)MAX_CHOP_AUTO_PCT);
         return;
@@ -831,8 +1074,9 @@ static float updateSurgeFoldbackTarget(float i_target_a) {
     return constrain(i_target_a, -cap, cap);
 }
 
-static inline bool isCurrentControlledMode(OperatingMode m) {
-    return (m == MODE_CURRENT_REF || m == MODE_CPM || m == MODE_ACTIVE_ASSIST || m == MODE_GOTO);
+static inline bool isCurrentControlledMode(StagedMode m) {
+    return (m == MODE_CURRENT_REF || m == MODE_CPM || m == MODE_ACTIVE_ASSIST || m == MODE_GOTO ||
+            m == MODE_ISOTONIC || m == MODE_ISOKINETIC || m == MODE_ISOMETRIC || m == MODE_HARDSTOP_LOCK);
 }
 
 static void executeBidirectionalCurrentControl(float i_target_a, float omega_m_deg_s) {
@@ -875,30 +1119,32 @@ static void executeBidirectionalCurrentControl(float i_target_a, float omega_m_d
                       ? g_vbus_volts : 24.0f;
     float v_max_cmd = 0.98f * vbus_safe;
 
-    // Polarity-reversal guard: during same-sign drive >25% PWM, detect sustained opposite ACS sign
+    // Polarity-reversal guard: freeze PI integration at 30ms & disable PI at 70ms if ACS opposes drive
     bool same_sign_drive = (v_ff * i_eff) > 0.0f;
     bool wrong_acs_sign  = (i_eff > 0.50f && g_motor_current_a < -0.50f) ||
                            (i_eff < -0.50f && g_motor_current_a > 0.50f);
-    if (g_acs_valid && g_motor_pwm_pct_f > 25.0f && same_sign_drive && wrong_acs_sign) {
+    if (g_acs_valid && (g_motor_pwm_pct_f > 8.0f || fabsf(g_motor_current_a) > 1.5f) &&
+        same_sign_drive && wrong_acs_sign) {
         if (g_acs_rev_neg_cnt < 200) g_acs_rev_neg_cnt++;
     } else {
         g_acs_rev_neg_cnt = 0;
     }
 
-    if (g_acs_valid && g_acs_rev_neg_cnt < 75) {
+    if (g_acs_valid && !g_acs_pol_warn_sent && g_acs_rev_neg_cnt < 35) {
         float i_err    = i_eff - g_motor_current_a;
         float p_term   = g_kp_i * i_err;
         float next_int = constrain(g_pi_integral_v + (g_ki_i * CONTROL_DT_SEC * i_err), -6.0f, 6.0f);
         float pre_cmd  = v_ff + p_term + g_pi_integral_v;
 
-        // Symmetric anti-windup against +/- 98% VBUS ceilings
-        if ((pre_cmd > -v_max_cmd || i_err > 0.0f) && (pre_cmd < v_max_cmd || i_err < 0.0f)) {
+        // Symmetric anti-windup against +/- 98% VBUS ceilings; pause integral during sustained wrong-sign check
+        if (g_acs_rev_neg_cnt < 15 &&
+            (pre_cmd > -v_max_cmd || i_err > 0.0f) && (pre_cmd < v_max_cmd || i_err < 0.0f)) {
             g_pi_integral_v = next_int;
         }
         v_cmd += p_term + g_pi_integral_v;
     } else {
         g_pi_integral_v = 0.0f;
-        if (g_acs_rev_neg_cnt >= 75 && !g_acs_pol_warn_sent) {
+        if (g_acs_rev_neg_cnt >= 35 && !g_acs_pol_warn_sent) {
             g_acs_pol_warn_sent    = true;
             g_acs_pol_warn_pending = true;
         }
@@ -925,7 +1171,7 @@ static void executeBidirectionalCurrentControl(float i_target_a, float omega_m_d
     applyMotorFloatPct(hw_dir, duty_pct);
 }
 
-static const char *modeName(OperatingMode m) {
+static const char *modeName(StagedMode m) {
     switch (m) {
         case MODE_IDLE:          return "IDLE ";
         case MODE_DIRECT_PWM:    return "PWM  ";
@@ -938,15 +1184,27 @@ static const char *modeName(OperatingMode m) {
         case MODE_CPM:           return "CPM  ";
         case MODE_ACTIVE_ASSIST: return "ASST ";
         case MODE_GOTO:          return "GOTO ";
+        case MODE_ISOTONIC:      return "ISO  ";
+        case MODE_ISOKINETIC:    return "ISOK ";
+        case MODE_ISOMETRIC:     return "ISOM ";
+        case MODE_HARDSTOP_LOCK: return "LOCK ";
         default:                 return "UNK  ";
     }
+}
+
+static bool isEspNowMasterAlive() {
+    return (g_wifi_enabled && g_espnow_ready && g_master_linked &&
+            ((uint32_t)(millis() - g_master_last_rx_ms) <= 2000U));
 }
 
 static void printTelemetry() {
     uint32_t win_max = g_loop_us_win_max;
     g_loop_us_win_max = 0;
 
-    Serial.printf("[S%d|%s] Tk:%6.2f(Tm:%6.2f,wk:%+6.1f,G:%.2f,H:%d) ENC:%6lld(ep:%+d,dp:%+d) | V:%5.2fV(%s) I:%+6.2f/%+5.2fA(%s,ap:%+d) | Tqg:%+5.1f F:%+4.0fN | MOT:%s%5.1f%% @%luHz | CHOP:%s%3.0f%% | dt:%lu/%luus\n",
+    const char *w_state = !g_wifi_enabled ? "OFF" : (isEspNowMasterAlive() ? "LNK" : (g_espnow_ready ? "RDY" : "ERR"));
+    const char *s_flag  = g_hardstop_locked ? "[LCK]" : (g_spasm_latched ? "[SPM]" : "");
+
+    Serial.printf("[S%d|%s] Tk:%6.2f(Tm:%6.2f,wk:%+6.1f,G:%.2f,H:%d) ENC:%6lld(ep:%+d,dp:%+d) | V:%5.2fV(%s) I:%+6.2f/%+5.2fA(%s,ap:%+d) | Tqg:%+5.1f Tqc:%+5.1f F:%+4.0fN | MOT:%s%5.1f%% @%luHz | CHOP:%s%3.0f%% | W:%s%s | dt:%lu/%luus\n",
                   FW_STAGE,
                   modeName(g_mode),
                   g_theta_k_deg,
@@ -964,12 +1222,15 @@ static void printTelemetry() {
                   g_acs_valid ? "OK" : "OL",
                   g_acs_polarity,
                   g_gbx_torque_nm,
+                  g_active_target_curve_nm,
                   g_pad_force_n,
                   (g_motor_pwm_pct_f < 0.05f) ? "STOP" : (g_motor_dir ? "FWD " : "REV "),
                   g_motor_pwm_pct_f,
                   (unsigned long)g_md_pwm_freq_hz,
                   (g_mode == MODE_CHOPPER_PULSE) ? "TEST" : chopModeName(g_chop_mode),
                   g_chopper_duty_pct,
+                  w_state,
+                  s_flag,
                   (unsigned long)win_max,
                   (unsigned long)g_loop_us_peak);
 }
@@ -988,6 +1249,11 @@ static void resetRepAccumulators() {
     g_rep_peak_flex_nm = 0.0f;
     g_rep_peak_ext_nm  = 0.0f;
     g_rep_work_j       = 0.0f;
+    g_rep_ang_pk_ext   = g_theta_k_deg;
+    g_rep_ang_pk_flex  = g_theta_k_deg;
+    g_rep_vel_sum      = 0.0;
+    g_rep_vel_sq_sum   = 0.0;
+    g_rep_samples      = 0;
 }
 
 static void updateRepTracker(float tk_deg, float omega_k_degs, float tau_knee_nm) {
@@ -1002,15 +1268,33 @@ static void updateRepTracker(float tk_deg, float omega_k_degs, float tau_knee_nm
             g_rep_peak_flex_nm = 0.0f;
             g_rep_peak_ext_nm  = 0.0f;
             g_rep_work_j       = 0.0f;
+            g_rep_ang_pk_ext   = tk_deg;
+            g_rep_ang_pk_flex  = tk_deg;
+            g_rep_vel_sum      = 0.0;
+            g_rep_vel_sq_sum   = 0.0;
+            g_rep_samples      = 0;
         }
         return;
     }
 
     if (tk_deg < g_rep_min_tk) g_rep_min_tk = tk_deg;
     if (tk_deg > g_rep_max_tk) g_rep_max_tk = tk_deg;
-    if (tau_knee_nm > g_rep_peak_flex_nm) g_rep_peak_flex_nm = tau_knee_nm;
-    if (-tau_knee_nm > g_rep_peak_ext_nm) g_rep_peak_ext_nm = -tau_knee_nm;
+    if (tau_knee_nm > g_rep_peak_flex_nm) {
+        g_rep_peak_flex_nm = tau_knee_nm;
+        g_rep_ang_pk_flex  = tk_deg;
+    }
+    if (-tau_knee_nm > g_rep_peak_ext_nm) {
+        g_rep_peak_ext_nm = -tau_knee_nm;
+        g_rep_ang_pk_ext  = tk_deg;
+    }
     g_rep_work_j += fabsf(tau_knee_nm * (omega_k_degs * RAD_PER_DEG)) * CONTROL_DT_SEC;
+
+    if (fabsf(omega_k_degs) > 3.0f) {
+        double v = (double)fabsf(omega_k_degs);
+        g_rep_vel_sum    += v;
+        g_rep_vel_sq_sum += v * v;
+        g_rep_samples++;
+    }
 
     if (g_rep_phase == 1) {
         if (tk_deg >= (g_rom_max_deg - 4.0f)) {
@@ -1019,14 +1303,40 @@ static void updateRepTracker(float tk_deg, float omega_k_degs, float tau_knee_nm
     } else if (g_rep_phase == 2) {
         if (tk_deg <= (g_rom_min_deg + 4.0f)) {
             g_rep_count++;
-            g_last_rep_num     = g_rep_count;
-            g_last_rep_min_tk  = g_rep_min_tk;
-            g_last_rep_max_tk  = g_rep_max_tk;
-            g_last_rep_flex_nm = g_rep_peak_flex_nm;
-            g_last_rep_ext_nm  = g_rep_peak_ext_nm;
-            g_last_rep_work_j  = g_rep_work_j;
-            g_rep_done_msg     = true;
-            g_rep_phase        = 0;
+            float cov_pct = 0.0f;
+            if (g_rep_samples >= 10U) {
+                double mean = g_rep_vel_sum / (double)g_rep_samples;
+                double var  = (g_rep_vel_sq_sum / (double)g_rep_samples) - (mean * mean);
+                if (var < 0.0) var = 0.0;
+                if (mean > 1.0) cov_pct = (float)((sqrt(var) / mean) * 100.0);
+            }
+
+            g_last_rep_num      = g_rep_count;
+            g_last_rep_min_tk   = g_rep_min_tk;
+            g_last_rep_max_tk   = g_rep_max_tk;
+            g_last_rep_flex_nm  = g_rep_peak_flex_nm;
+            g_last_rep_ext_nm   = g_rep_peak_ext_nm;
+            g_last_rep_work_j   = g_rep_work_j;
+            g_last_rep_ang_ext  = g_rep_ang_pk_ext;
+            g_last_rep_ang_flex = g_rep_ang_pk_flex;
+            g_last_rep_cov_pct  = cov_pct;
+
+            g_latest_rep_summary.pkt_type            = PKT_TOPHUB_REP_SUMMARY;
+            g_latest_rep_summary.rep_index           = (g_rep_count > 65535U) ? (uint16_t)65535U : (uint16_t)g_rep_count;
+            g_latest_rep_summary.achieved_rom_min    = g_last_rep_min_tk;
+            g_latest_rep_summary.achieved_rom_max    = g_last_rep_max_tk;
+            g_latest_rep_summary.peak_torque_ext_nm  = g_last_rep_ext_nm;
+            g_latest_rep_summary.angle_at_peak_ext   = g_last_rep_ang_ext;
+            g_latest_rep_summary.peak_torque_flex_nm = g_last_rep_flex_nm;
+            g_latest_rep_summary.angle_at_peak_flex  = g_last_rep_ang_flex;
+            g_latest_rep_summary.rep_work_joules     = g_last_rep_work_j;
+            g_latest_rep_summary.vel_cov_pct         = g_last_rep_cov_pct;
+            g_latest_rep_summary.crc16 = computeCRC16(&g_latest_rep_summary,
+                                                      sizeof(TopHubRepSummaryPacket_t) - sizeof(uint16_t));
+
+            g_rep_done_msg        = true;
+            g_rep_summary_tx_pend = true;
+            g_rep_phase           = 0;
         }
     }
 }
@@ -1057,6 +1367,643 @@ static float computePositionAssistCurrent(float target_tk, float target_wk,
 }
 
 // ----------------------------------------------------------------------------
+// 7C. STAGE 7 CLINICAL TORQUE CURVES, ANTI-BACKLASH & ITEMIZED SAFETY
+// ----------------------------------------------------------------------------
+static const float CLINICAL_PI = 3.14159265358979323846f;
+
+static const char *pathologyName(uint8_t profile) {
+    switch (profile) {
+        case PATH_STANDARD:      return "STD";
+        case PATH_ACL_PROTECTED: return "ACL";
+        case PATH_TKA:           return "TKA";
+        case PATH_PFPS:          return "PFPS";
+        default:                 return "UNK";
+    }
+}
+
+static float computePhysiologicalTorqueTarget(float theta_k_deg, float peak_torque_nm,
+                                              bool is_extension, uint8_t profile) {
+    if (peak_torque_nm <= 0.01f) return 0.0f;
+
+    float u     = constrain(theta_k_deg / 110.0f, 0.0f, 1.0f);
+    float shape = is_extension ? (0.35f + 0.65f * sinf(CLINICAL_PI * u))
+                               : (0.40f + 0.60f * sinf(CLINICAL_PI * u));
+
+    if (profile == PATH_ACL_PROTECTED && is_extension && theta_k_deg < 40.0f) {
+        // Protect ACL graft against anterior tibial shear in terminal 40 -> 0 deg extension
+        float acl_taper = constrain(0.15f + 0.85f * (theta_k_deg / 40.0f), 0.15f, 1.0f);
+        shape *= acl_taper;
+    } else if (profile == PATH_TKA) {
+        float low_margin  = constrain((theta_k_deg - 10.0f) / 30.0f, 0.0f, 1.0f);
+        float high_margin = constrain((100.0f - theta_k_deg) / 30.0f, 0.0f, 1.0f);
+        shape *= (0.60f + 0.40f * fminf(low_margin, high_margin));
+    } else if (profile == PATH_PFPS && theta_k_deg > 55.0f) {
+        float pfps_taper = 1.0f - 0.65f * constrain((theta_k_deg - 55.0f) / 45.0f, 0.0f, 1.0f);
+        shape *= pfps_taper;
+    }
+
+    return fmaxf(0.0f, peak_torque_nm * shape);
+}
+
+static float computeAntiBacklashFactor(int8_t desired_sign) {
+    if (desired_sign == 0) return 1.0f;
+    if (desired_sign != g_last_torque_sign) {
+        g_last_torque_sign = desired_sign;
+        g_last_rev_theta_m = g_theta_m_deg;
+    }
+    float delta_deg = fabsf(g_theta_m_deg - g_last_rev_theta_m);
+    return constrain(0.25f + 0.75f * (delta_deg / BACKLASH_DEG_DEFAULT), 0.25f, 1.0f);
+}
+
+static inline bool isClinicalTherapyMode(StagedMode m) {
+    return (m == MODE_CPM || m == MODE_ACTIVE_ASSIST || m == MODE_GOTO ||
+            m == MODE_ISOTONIC || m == MODE_ISOKINETIC || m == MODE_ISOMETRIC);
+}
+
+static void engageHardStopLock(bool from_espnow) {
+    g_hardstop_locked        = true;
+    g_spasm_latched          = false;
+    g_in_spasm_backoff       = false;
+    g_ctrl_from_espnow       = from_espnow;
+    g_freeze_theta_m_deg     = g_theta_m_deg;
+    g_mode                   = MODE_HARDSTOP_LOCK;
+    g_cmd_motor_pct          = 0;
+    g_cmd_motor_dir          = 0;
+    g_cmd_iref_a             = 0.0f;
+    g_active_iref_a          = 0.0f;
+    g_pi_integral_v          = 0.0f;
+    g_ctrl_v_ff              = 0.0f;
+    g_ctrl_v_cmd             = 0.0f;
+    g_home_phase             = 0;
+    g_obst_ticks             = 0;
+    g_residual_spike_ticks   = 0;
+    g_clonus_reversals       = 0;
+    g_last_torque_sign       = 0;
+    g_active_target_curve_nm = 0.0f;
+    g_safety_msg_code        = 7;
+    g_safety_msg_val         = g_theta_k_deg;
+}
+
+static void releaseHardStopLock() {
+    bool was_locked = (g_mode == MODE_HARDSTOP_LOCK || g_hardstop_locked);
+    stopAllImmediate();
+    g_spasm_latched        = false;
+    g_espnow_fault_lockout = false;
+    if (was_locked) {
+        g_safety_msg_code = 8;
+        g_safety_msg_val  = g_theta_k_deg;
+    }
+}
+
+static void evaluateSafetySupervisor(uint32_t now_ms) {
+    static uint16_t   s_cpm_catch_ticks  = 0;
+    static uint16_t   s_spasm_dfdt_ticks = 0;
+    static StagedMode s_prev_sup_mode    = MODE_IDLE;
+    StagedMode        entry_mode         = g_mode;
+
+    auto finalizeSupervisor = [&]() {
+        g_prev_pad_force_n = g_pad_force_n;
+        s_prev_sup_mode    = g_mode;
+    };
+
+    // 1. Deterministic 500 ms ESP-NOW Heartbeat Watchdog when U1 Master is controlling
+    if (g_ctrl_from_espnow && (uint32_t)(now_ms - g_master_last_rx_ms) > ESPNOW_WATCHDOG_MS) {
+        stopAllImmediate();
+        s_cpm_catch_ticks  = 0;
+        s_spasm_dfdt_ticks = 0;
+        g_safety_msg_code  = 6;
+        g_safety_msg_val   = (float)ESPNOW_WATCHDOG_MS;
+        finalizeSupervisor();
+        return;
+    }
+
+    // Seed derivative baseline when freshly entering clinical therapy so prior modes cannot false-trip
+    if (isClinicalTherapyMode(entry_mode) && !isClinicalTherapyMode(s_prev_sup_mode)) {
+        g_prev_pad_force_n = g_pad_force_n;
+        s_spasm_dfdt_ticks = 0;
+    }
+
+    // Reset CPM catch integrator whenever outside active CPM travel
+    if (g_mode != MODE_CPM || g_in_spasm_backoff || (g_cpm_phase != 0 && g_cpm_phase != 2)) {
+        s_cpm_catch_ticks = 0;
+    }
+
+    // 2. Itemized Clinical Spasm / Catch / Residual / Clonus Supervisors
+    if (isClinicalTherapyMode(g_mode) && g_safety_spasm_en && !g_in_spasm_backoff) {
+        // 2a. Rising rapid force transient (spasm dF/dt sustained >= 3 ticks / 6 ms to reject EMI spikes)
+        if (g_acs_valid && fabsf(g_pad_force_n) > 80.0f &&
+            fabsf(g_pad_force_n) > fabsf(g_prev_pad_force_n)) {
+            float df_dt_ns = fabsf(g_pad_force_n - g_prev_pad_force_n) / CONTROL_DT_SEC;
+            if (df_dt_ns > 2500.0f) {
+                if (s_spasm_dfdt_ticks < 50U) s_spasm_dfdt_ticks++;
+                if (s_spasm_dfdt_ticks >= 3U) {
+                    s_spasm_dfdt_ticks     = 0;
+                    g_safety_trip_f_n      = g_pad_force_n;
+                    g_safety_trip_i_a      = g_motor_current_a;
+                    g_safety_trip_mv       = g_acs_raw_mv;
+                    stopAllImmediate();
+                    g_spasm_latched        = true;
+                    g_espnow_fault_lockout = true;
+                    g_safety_msg_code      = 2;
+                    g_safety_msg_val       = df_dt_ns;
+                    finalizeSupervisor();
+                    return;
+                }
+            } else {
+                s_spasm_dfdt_ticks = 0;
+            }
+        } else {
+            s_spasm_dfdt_ticks = 0;
+        }
+
+        // 2b. CPM Joint-Catch & 4 deg Relief Backoff
+        if (g_mode == MODE_CPM && (g_cpm_phase == 0 || g_cpm_phase == 2)) {
+            if (fabsf(g_traj_target_tk - g_theta_k_deg) > 8.0f && fabsf(g_pad_force_n) > 35.0f) {
+                if (s_cpm_catch_ticks < 500U) s_cpm_catch_ticks++;
+                if (s_cpm_catch_ticks >= 60U) { // 120 ms sustained loaded catch
+                    s_cpm_catch_ticks      = 0;
+                    g_in_spasm_backoff     = true;
+                    g_spasm_latched        = true;
+                    g_espnow_fault_lockout = true;
+                    g_obst_ticks           = 0;
+                    g_cpm_dwell_ms         = now_ms;
+                    g_backoff_target_tk    = constrain(g_theta_k_deg + ((g_cpm_phase == 0) ? -4.0f : +4.0f),
+                                                       g_rom_min_deg, g_rom_max_deg);
+                    g_traj_target_tk       = g_theta_k_deg;
+                    g_safety_msg_code      = 3;
+                    g_safety_msg_val       = g_theta_k_deg;
+                    finalizeSupervisor();
+                    return;
+                }
+            } else {
+                s_cpm_catch_ticks = 0;
+            }
+        }
+
+        // 2c. Residual current / torque spike at near-zero velocity (excluding static isometric hold)
+        if (g_mode != MODE_ISOMETRIC && g_acs_valid &&
+            fabsf(g_omega_k_deg_s) < 2.0f && fabsf(g_motor_current_a) > 11.0f) {
+            if (g_residual_spike_ticks < 500U) g_residual_spike_ticks++;
+            if (g_residual_spike_ticks >= 150U) { // 300 ms sustained stall push
+                float i_trip = g_motor_current_a;
+                stopAllImmediate();
+                g_spasm_latched        = true;
+                g_espnow_fault_lockout = true;
+                g_safety_msg_code      = 4;
+                g_safety_msg_val       = i_trip;
+                finalizeSupervisor();
+                return;
+            }
+        } else {
+            g_residual_spike_ticks = 0;
+        }
+
+        // 2d. Clonus rapid loaded velocity oscillation (>= 6 reversals within 1.0 s)
+        if (fabsf(g_omega_k_deg_s) >= 8.0f && fabsf(g_pad_force_n) >= 20.0f) {
+            int8_t vsign = (g_omega_k_deg_s > 0.0f) ? +1 : -1;
+            if (g_prev_vel_sign != 0 && vsign != g_prev_vel_sign) {
+                if (g_clonus_reversals == 0 || (uint32_t)(now_ms - g_clonus_window_start) > 1000U) {
+                    g_clonus_window_start = now_ms;
+                    g_clonus_reversals    = 1;
+                } else {
+                    g_clonus_reversals++;
+                }
+                if (g_clonus_reversals >= 6U) {
+                    float rev_cnt = (float)g_clonus_reversals;
+                    stopAllImmediate();
+                    g_spasm_latched        = true;
+                    g_espnow_fault_lockout = true;
+                    g_safety_msg_code      = 5;
+                    g_safety_msg_val       = rev_cnt;
+                    finalizeSupervisor();
+                    return;
+                }
+            }
+            g_prev_vel_sign = vsign;
+        } else if (g_clonus_reversals > 0 && (uint32_t)(now_ms - g_clonus_window_start) > 1200U) {
+            g_clonus_reversals = 0;
+        }
+    } else {
+        g_residual_spike_ticks = 0;
+    }
+
+    finalizeSupervisor();
+}
+
+// ----------------------------------------------------------------------------
+// 7D. STAGE 7 WI-FI + ESP-NOW PROTOCOL HANDLERS (U2 <-> U1: ESP_MASTER)
+// ----------------------------------------------------------------------------
+static uint8_t g_rx_src_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+static bool registerEspNowPeer(const uint8_t *mac_addr) {
+    if (!g_espnow_ready || mac_addr == nullptr) return false;
+    if (esp_now_is_peer_exist(mac_addr)) return true;
+    esp_now_peer_info_t peer = {};
+    memcpy(peer.peer_addr, mac_addr, 6);
+    peer.channel = 0; // Follow active primary channel configured via esp_wifi_set_channel
+    peer.encrypt = false;
+    return (esp_now_add_peer(&peer) == ESP_OK);
+}
+
+static void handleRawEspNowPacket(const uint8_t *src_mac, const uint8_t *data, int len) {
+    if (data == nullptr || len != (int)sizeof(RehabCommandPacket_t)) {
+        g_espnow_rx_bad++;
+        return;
+    }
+    RehabCommandPacket_t pkt;
+    memcpy(&pkt, data, sizeof(pkt));
+    if (pkt.pkt_type != PKT_HEARTBEAT_CMD || (pkt.target_node != NODE_TOPHUB && pkt.target_node != 0xFF)) {
+        return;
+    }
+    uint16_t expected_crc = computeCRC16(&pkt, sizeof(RehabCommandPacket_t) - sizeof(uint16_t));
+    if (pkt.crc16 != expected_crc) {
+        g_espnow_rx_bad++;
+        return;
+    }
+
+    portENTER_CRITICAL(&g_rx_mux);
+    memcpy(&g_rx_staging_pkt, &pkt, sizeof(RehabCommandPacket_t));
+    if (src_mac != nullptr) {
+        memcpy(g_rx_src_mac, src_mac, 6);
+    }
+    g_rx_pkt_pending = true;
+    portEXIT_CRITICAL(&g_rx_mux);
+}
+
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+static void onEspNowDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingData, int len) {
+    const uint8_t *src_mac = (recv_info != nullptr) ? recv_info->src_addr : nullptr;
+    handleRawEspNowPacket(src_mac, incomingData, len);
+}
+#else
+static void onEspNowDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
+    handleRawEspNowPacket(mac_addr, incomingData, len);
+}
+#endif
+
+static void deinitEspNowLink() {
+    if (g_espnow_ready) {
+        esp_now_deinit();
+    }
+    g_espnow_ready  = false;
+    g_master_linked = false;
+    WiFi.setSleep(true);
+    WiFi.disconnect(true, false);
+    WiFi.mode(WIFI_OFF);
+    (void)esp_wifi_stop();
+    reclaimOutputsAfterWifi();
+}
+
+static bool initEspNowLink() {
+    if (!g_wifi_enabled) {
+        deinitEspNowLink();
+        return false;
+    }
+
+    if (g_espnow_ready) {
+        esp_now_deinit();
+        g_espnow_ready = false;
+    }
+
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect(false, false);
+    WiFi.setSleep(false); // Keep Wi-Fi radio awake so ESP-NOW E-Stop latency stays <3 ms
+    esp_wifi_set_promiscuous(true);
+    esp_wifi_set_channel(g_wifi_channel, WIFI_SECOND_CHAN_NONE);
+    esp_wifi_set_promiscuous(false);
+
+    if (esp_now_init() != ESP_OK) {
+        g_espnow_ready = false;
+        reclaimOutputsAfterWifi();
+        return false;
+    }
+    if (esp_now_register_recv_cb(onEspNowDataRecv) != ESP_OK) {
+        esp_now_deinit();
+        g_espnow_ready = false;
+        reclaimOutputsAfterWifi();
+        return false;
+    }
+
+    g_espnow_ready = true;
+    static const uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    (void)registerEspNowPeer(kBroadcastMac);
+    if (g_master_linked) {
+        (void)registerEspNowPeer(g_master_mac);
+    }
+    reclaimOutputsAfterWifi();
+    return true;
+}
+
+static void processPendingEspNowCmd(uint32_t now_ms) {
+    if (!g_rx_pkt_pending) return;
+
+    RehabCommandPacket_t pkt;
+    uint8_t src_mac[6];
+    portENTER_CRITICAL(&g_rx_mux);
+    memcpy(&pkt, &g_rx_staging_pkt, sizeof(RehabCommandPacket_t));
+    memcpy(src_mac, g_rx_src_mac, 6);
+    g_rx_pkt_pending = false;
+    portEXIT_CRITICAL(&g_rx_mux);
+
+    g_espnow_rx_ok++;
+    g_master_last_rx_ms = now_ms;
+
+    if (!g_master_linked || memcmp(g_master_mac, src_mac, 6) != 0) {
+        bool is_valid_unicast = (src_mac[0] | src_mac[1] | src_mac[2] | src_mac[3] | src_mac[4] | src_mac[5]) != 0 &&
+                                !(src_mac[0] == 0xFF && src_mac[1] == 0xFF && src_mac[2] == 0xFF);
+        if (is_valid_unicast) {
+            memcpy(g_master_mac, src_mac, 6);
+            (void)registerEspNowPeer(g_master_mac);
+        }
+        if (!g_master_linked) {
+            g_master_linked   = true;
+            g_espnow_evt_code = 1;
+        }
+    }
+
+    // Apply clinical geometry & pathology updates (preserving 0.250 m pivot offset!)
+    if (isfinite(pkt.L_leg_m) && pkt.L_leg_m >= 0.15f && pkt.L_leg_m <= 0.60f) {
+        g_L_leg_m = pkt.L_leg_m;
+    }
+    if (isfinite(pkt.d_offset_m) && pkt.d_offset_m >= 0.0f && pkt.d_offset_m <= 0.95f * g_L_leg_m) {
+        g_d_offset_m = pkt.d_offset_m;
+    }
+    if (isfinite(pkt.rom_min_deg) && isfinite(pkt.rom_max_deg) &&
+        pkt.rom_min_deg >= ROM_ABS_MIN_DEG && pkt.rom_max_deg <= ROM_ABS_MAX_DEG &&
+        (pkt.rom_max_deg - pkt.rom_min_deg) >= ROM_MIN_SPAN_DEG) {
+        g_rom_min_deg = pkt.rom_min_deg;
+        g_rom_max_deg = pkt.rom_max_deg;
+    }
+    if (pkt.pathology_profile <= PATH_PFPS) {
+        g_pathology_profile = pkt.pathology_profile;
+    }
+
+    // 1. Electronic Hard-Stop Arbitration (highest priority)
+    if (pkt.estop_active == ESTOP_HARD_STOP_LOCKED) {
+        if (g_mode != MODE_HARDSTOP_LOCK) {
+            engageHardStopLock(true);
+        }
+        return;
+    }
+    if (pkt.estop_active == ESTOP_HARD_STOP_RELEASE) {
+        g_espnow_fault_lockout   = false;
+        g_espnow_oneshot_latched = false;
+        if (g_mode == MODE_HARDSTOP_LOCK || g_hardstop_locked || g_ctrl_from_espnow || g_spasm_latched) {
+            releaseHardStopLock();
+        }
+        return;
+    }
+    if (g_mode == MODE_HARDSTOP_LOCK) {
+        return; // Hold lock until explicit ESTOP_HARD_STOP_RELEASE or local 'release'
+    }
+
+    bool is_oneshot_op = (pkt.op_mode == OP_SETUP_FULL_25S ||
+                          pkt.op_mode == OP_SETUP_QUICK_6S ||
+                          pkt.op_mode == OP_AUTO_BENCH_TEST);
+    if (!is_oneshot_op) {
+        g_espnow_oneshot_latched = false;
+    }
+
+    // 2. Local CLI Priority Arbitration: background OP_IDLE heartbeats never interrupt local bench tests
+    if (pkt.op_mode == OP_IDLE) {
+        g_espnow_fault_lockout = false;
+        if (g_ctrl_from_espnow || g_spasm_latched) {
+            stopAllImmediate();
+            g_spasm_latched = false;
+        }
+        return;
+    }
+
+    // 3. Safety Lockout: refuse to auto-restart motor on 10Hz heartbeats after a spasm or fault
+    //    until U1 Master explicitly acknowledges via OP_IDLE or ESTOP_HARD_STOP_RELEASE
+    if (g_espnow_fault_lockout || g_spasm_latched) {
+        return;
+    }
+
+    // Require valid homing before Master enters clinical closed-loop therapy modes
+    bool needs_home = (pkt.op_mode == OP_CPM || pkt.op_mode == OP_ISOTONIC ||
+                       pkt.op_mode == OP_ISOKINETIC || pkt.op_mode == OP_ISOMETRIC ||
+                       pkt.op_mode == OP_ACTIVE_ASSIST);
+    if (needs_home && !g_is_homed) {
+        g_espnow_evt_code = 2;
+        return;
+    }
+
+    switch (pkt.op_mode) {
+        case OP_SETUP_FULL_25S:
+        case OP_SETUP_QUICK_6S: {
+            if (!g_espnow_oneshot_latched && !(g_mode == MODE_AUTOHOME && g_ctrl_from_espnow)) {
+                if (!MOTOR_BIDIRECTIONAL_ENABLED || !g_acs_valid || (g_vbus_valid && g_vbus_volts < 15.0f)) {
+                    return;
+                }
+                stopAllImmediate();
+                g_spasm_latched          = false;
+                g_ctrl_from_espnow       = true;
+                g_espnow_oneshot_latched = true;
+                g_home_phase             = 1;
+                g_home_start_ms          = now_ms;
+                g_home_phase_ms          = now_ms;
+                g_home_start_cnt         = g_enc_counts;
+                g_home_window_cnt        = g_enc_counts;
+                g_home_stall_hits        = 0;
+                g_homing_msg_code        = 0;
+                g_mode                   = MODE_AUTOHOME;
+            }
+            break;
+        }
+
+        case OP_CPM: {
+            g_cpm_speed_degs    = constrain(isfinite(pkt.target_vel_deg_s) ? pkt.target_vel_deg_s : DEFAULT_CPM_SPEED_DEGS, 3.0f, 60.0f);
+            g_cpm_target_cycles = 0;
+            g_ctrl_from_espnow  = true;
+            if (g_mode != MODE_CPM) {
+                g_spasm_latched    = false;
+                g_in_spasm_backoff = false;
+                g_cpm_done_cycles  = 0;
+                g_traj_target_tk   = constrain(g_theta_k_deg, g_rom_min_deg, g_rom_max_deg);
+                g_cpm_phase        = (g_traj_target_tk >= g_rom_max_deg - 2.0f) ? 2 : 0;
+                g_cpm_dwell_ms     = now_ms;
+                g_obst_ticks       = 0;
+                g_motion_msg_code  = 0;
+                resetRepAccumulators();
+                g_mode = MODE_CPM;
+            }
+            break;
+        }
+
+        case OP_ACTIVE_ASSIST: {
+            float spd = (isfinite(pkt.target_vel_deg_s) && pkt.target_vel_deg_s >= 5.0f)
+                        ? pkt.target_vel_deg_s : DEFAULT_AST_SPEED_DEGS;
+            g_assist_speed_degs = constrain(spd, 5.0f, 60.0f);
+            g_assist_auto_cycle = false;
+            g_ctrl_from_espnow  = true;
+            if (g_mode != MODE_ACTIVE_ASSIST) {
+                g_spasm_latched    = false;
+                g_assist_anchor_tk = g_theta_k_deg;
+                g_traj_target_tk   = constrain(g_theta_k_deg, g_rom_min_deg, g_rom_max_deg);
+                float mid          = 0.5f * (g_rom_min_deg + g_rom_max_deg);
+                g_assist_phase     = (g_theta_k_deg <= mid) ? 0 : 3;
+                g_obst_ticks       = 0;
+                g_assist_msg_code  = 0;
+                resetRepAccumulators();
+                g_mode = MODE_ACTIVE_ASSIST;
+            }
+            break;
+        }
+
+        case OP_ISOTONIC: {
+            g_iso_ext_nm       = constrain(isfinite(pkt.target_torque_ext) ? pkt.target_torque_ext : DEFAULT_ISO_EXT_NM, 0.0f, 45.0f);
+            g_iso_flex_nm      = constrain(isfinite(pkt.target_torque_flex) ? pkt.target_torque_flex : DEFAULT_ISO_FLEX_NM, 0.0f, 45.0f);
+            g_ctrl_from_espnow = true;
+            if (g_mode != MODE_ISOTONIC) {
+                g_spasm_latched    = false;
+                g_last_torque_sign = 0;
+                resetRepAccumulators();
+                g_mode = MODE_ISOTONIC;
+            }
+            break;
+        }
+
+        case OP_ISOKINETIC: {
+            g_isok_vel_degs    = constrain(isfinite(pkt.target_vel_deg_s) ? pkt.target_vel_deg_s : DEFAULT_ISOK_VEL_DEGS, 10.0f, 180.0f);
+            float e_cap        = isfinite(pkt.target_torque_ext) ? pkt.target_torque_ext : DEFAULT_ISO_EXT_NM;
+            float f_cap        = isfinite(pkt.target_torque_flex) ? pkt.target_torque_flex : DEFAULT_ISO_FLEX_NM;
+            g_isok_ext_cap_nm  = constrain(e_cap, 0.0f, 45.0f);
+            g_isok_flex_cap_nm = constrain(f_cap, 0.0f, 45.0f);
+            g_ctrl_from_espnow = true;
+            if (g_mode != MODE_ISOKINETIC) {
+                g_spasm_latched    = false;
+                g_last_torque_sign = 0;
+                resetRepAccumulators();
+                g_mode = MODE_ISOKINETIC;
+            }
+            break;
+        }
+
+        case OP_ISOMETRIC: {
+            float hold_ang = 0.5f * (g_rom_min_deg + g_rom_max_deg);
+            if (isfinite(pkt.target_vel_deg_s) && pkt.target_vel_deg_s >= 1.0f && pkt.target_vel_deg_s <= ROM_ABS_MAX_DEG) {
+                hold_ang = pkt.target_vel_deg_s;
+            } else if (isfinite(pkt.rom_min_deg) && isfinite(pkt.rom_max_deg) &&
+                       fabsf(pkt.rom_max_deg - pkt.rom_min_deg) < 2.0f &&
+                       pkt.rom_min_deg >= ROM_ABS_MIN_DEG && pkt.rom_min_deg <= ROM_ABS_MAX_DEG) {
+                hold_ang = pkt.rom_min_deg;
+            }
+            g_isom_angle_tk    = constrain(hold_ang, g_rom_min_deg, g_rom_max_deg);
+            float m_cap        = fmaxf(isfinite(pkt.target_torque_ext) ? pkt.target_torque_ext : 0.0f,
+                                       isfinite(pkt.target_torque_flex) ? pkt.target_torque_flex : 0.0f);
+            g_isom_max_nm      = constrain((m_cap > 0.5f) ? m_cap : DEFAULT_ISOM_MAX_NM, 1.0f, 45.0f);
+            g_ctrl_from_espnow = true;
+            if (g_mode != MODE_ISOMETRIC) {
+                g_spasm_latched  = false;
+                g_traj_target_tk = g_theta_k_deg;
+                g_mode           = MODE_ISOMETRIC;
+            }
+            break;
+        }
+
+        case OP_DIRECT_PWM_TEST: {
+            float signed_pct   = constrain(isfinite(pkt.target_vel_deg_s) ? pkt.target_vel_deg_s : 0.0f,
+                                           -(float)MAX_MOTOR_PWM_PCT, (float)MAX_MOTOR_PWM_PCT);
+            int   dir          = (signed_pct >= 0.0f) ? 1 : 0;
+            int   mag          = (int)lroundf(fabsf(signed_pct));
+            g_spasm_latched    = false;
+            g_ctrl_from_espnow = true;
+            g_cmd_motor_dir    = MOTOR_BIDIRECTIONAL_ENABLED ? dir : 0;
+            g_cmd_motor_pct    = mag;
+            g_mode             = (mag == 0) ? MODE_IDLE : MODE_DIRECT_PWM;
+            break;
+        }
+
+        case OP_AUTO_BENCH_TEST: {
+            if (!g_espnow_oneshot_latched && !(g_mode == MODE_BENCH_PULSE && g_ctrl_from_espnow)) {
+                stopAllImmediate();
+                g_spasm_latched          = false;
+                g_ctrl_from_espnow       = true;
+                g_espnow_oneshot_latched = true;
+                g_pulse_start_ms         = now_ms;
+                g_mode                   = MODE_BENCH_PULSE;
+            }
+            break;
+        }
+
+        default:
+            break;
+    }
+}
+
+static void sendEspNowTelemetry50Hz() {
+    if (!g_wifi_enabled || !g_espnow_ready) return;
+
+    const uint8_t *dest = g_master_linked ? g_master_mac : nullptr;
+    static const uint8_t kBcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    if (dest == nullptr) dest = kBcast;
+
+    TopHubTelemetryPacket_t telem = {};
+    telem.pkt_type           = PKT_TOPHUB_TELEMETRY;
+    telem.node_id            = NODE_TOPHUB;
+    telem.seq_num            = g_telem_seq++;
+    telem.state_flags        = 0;
+    if (g_is_homed)                                      telem.state_flags |= STATE_FLAG_HOMED;
+    if (g_cal_valid)                                     telem.state_flags |= STATE_FLAG_CALIBRATED;
+    if (g_chopper_duty_pct > 0.5f)                       telem.state_flags |= STATE_FLAG_CHOPPER_ACTIVE;
+    if (g_spasm_latched)                                 telem.state_flags |= STATE_FLAG_SPASM_STOP;
+    if (g_mode == MODE_HARDSTOP_LOCK || g_hardstop_locked) telem.state_flags |= STATE_FLAG_HARDSTOP_LOCKED;
+    telem.current_rep        = (g_rep_count > 65535U) ? (uint16_t)65535U : (uint16_t)g_rep_count;
+    telem.knee_angle_deg     = g_theta_k_deg;
+    telem.knee_vel_deg_s     = g_omega_k_deg_s;
+    telem.knee_torque_nm     = g_knee_torque_nm;
+    telem.gearbox_torque_nm  = g_gbx_torque_nm;
+    telem.pad_force_newtons  = g_pad_force_n;
+    telem.motor_current_amps = g_motor_current_a;
+    telem.target_curve_nm    = g_active_target_curve_nm;
+    telem.vbus_volts         = g_vbus_volts;
+    telem.chopper_duty_pct   = g_chopper_duty_pct;
+    telem.crc16              = computeCRC16(&telem, sizeof(TopHubTelemetryPacket_t) - sizeof(uint16_t));
+
+    if (esp_now_send(dest, (const uint8_t *)&telem, sizeof(telem)) == ESP_OK) {
+        g_espnow_tx_ok++;
+    } else {
+        g_espnow_tx_err++;
+    }
+
+    if (g_rep_summary_tx_pend) {
+        g_rep_summary_tx_pend = false;
+        if (esp_now_send(dest, (const uint8_t *)&g_latest_rep_summary, sizeof(g_latest_rep_summary)) == ESP_OK) {
+            g_espnow_tx_ok++;
+        } else {
+            g_espnow_tx_err++;
+        }
+    }
+}
+
+static void printEspNowStatus() {
+    uint8_t my_mac[6] = {0};
+    if (g_wifi_enabled) {
+        WiFi.macAddress(my_mac);
+    }
+    Serial.printf("[ESPNOW] WiFi:%s | Ch:%u | Radio:%s | MAC:%02X:%02X:%02X:%02X:%02X:%02X | U1 Master:%s",
+                  g_wifi_enabled ? "ON" : "OFF",
+                  (unsigned)g_wifi_channel,
+                  g_espnow_ready ? "READY" : "DOWN",
+                  my_mac[0], my_mac[1], my_mac[2], my_mac[3], my_mac[4], my_mac[5],
+                  g_master_linked ? "LINKED" : "WAIT");
+    if (g_master_linked) {
+        uint32_t age_ms = (uint32_t)(millis() - g_master_last_rx_ms);
+        Serial.printf(" (%02X:%02X:%02X:%02X:%02X:%02X, age=%lums, ctrl=%s)",
+                      g_master_mac[0], g_master_mac[1], g_master_mac[2],
+                      g_master_mac[3], g_master_mac[4], g_master_mac[5],
+                      (unsigned long)age_ms,
+                      g_ctrl_from_espnow ? "U1" : "CLI");
+    }
+    Serial.printf(" | TX ok:%lu err:%lu | RX ok:%lu bad:%lu\n",
+                  (unsigned long)g_espnow_tx_ok,
+                  (unsigned long)g_espnow_tx_err,
+                  (unsigned long)g_espnow_rx_ok,
+                  (unsigned long)g_espnow_rx_bad);
+}
+
+// ----------------------------------------------------------------------------
 // 8. 500 Hz DETERMINISTIC CONTROL STEP
 // ----------------------------------------------------------------------------
 static void runControlStep500Hz() {
@@ -1065,40 +2012,67 @@ static void runControlStep500Hz() {
     updateEncoderKinematics500Hz();
     sampleAnalogSensors500Hz();
 
+    // Passive MY1016 + 52:1 gearbox torque and pad-force estimation (before safety & control)
+    float tau_em_gbx = GEAR_RATIO * GEAR_EFFICIENCY * KT_MOTOR_NM_PER_A * g_motor_current_a;
+    g_gbx_torque_nm  = constrain(tau_em_gbx, -GBX_MAX_TORQUE_NM, GBX_MAX_TORQUE_NM);
+    g_knee_torque_nm = (g_gamma_factor > 0.1f) ? (g_gbx_torque_nm / g_gamma_factor) : g_gbx_torque_nm;
+    g_pad_force_n    = (g_L_leg_m > 0.05f) ? (g_knee_torque_nm / g_L_leg_m) : 0.0f;
+
+    processPendingEspNowCmd(millis());
+
     // Overcurrent fault protection: >25A sustained for 500ms (250 ticks @ 500Hz) shuts down
     // before stressing MDD10A (30A/10s peak), while riding out brief MY1016 inrush spikes.
     if (g_acs_valid && fabsf(g_motor_current_a) > HW_OVERCURRENT_CUT_A && g_mode != MODE_IDLE) {
         if (g_oc_ticks < HW_OVERCURRENT_TICKS) g_oc_ticks++;
         if (g_oc_ticks >= HW_OVERCURRENT_TICKS) {
             stopAllImmediate();
-            g_oc_fault_msg_pend = true;
+            g_espnow_fault_lockout = true;
+            g_oc_fault_msg_pend    = true;
         }
     } else if (g_oc_ticks > 0U) {
         g_oc_ticks = (g_oc_ticks >= 2U) ? (uint16_t)(g_oc_ticks - 2U) : 0U;
     }
 
-    // CHOP_OFF overvoltage cutoff (>27.5V) protects 24V supply/caps while chopper is disconnected
-    if (g_chop_mode == CHOP_OFF && g_vbus_valid && g_vbus_volts > VBUS_CHOP_OFF_OV_V && g_mode != MODE_IDLE) {
-        stopAllImmediate();
-        g_motion_msg_code = 5;
-        g_motion_msg_val  = g_vbus_volts;
+    // Absolute hardware overvoltage fault (>28.8 V): unconditional chopper dump + motor cutoff
+    if (g_vbus_valid && g_vbus_volts > VBUS_ABS_OV_FAULT_V) {
+        if (g_mode != MODE_IDLE) {
+            stopAllImmediate();
+            g_espnow_fault_lockout = true;
+        }
+        applyChopperFloatPct(100.0f, (float)MAX_CHOP_AUTO_PCT);
+        if (!g_abs_ov_fault_latched) {
+            g_abs_ov_fault_latched = true;
+            g_safety_msg_code      = 1;
+            g_safety_msg_val       = g_vbus_volts;
+        }
+    } else {
+        if (g_abs_ov_fault_latched && (!g_vbus_valid || g_vbus_volts < (VBUS_ABS_OV_FAULT_V - 0.5f))) {
+            g_abs_ov_fault_latched = false;
+        }
+        if (g_chop_mode == CHOP_OFF && g_vbus_valid && g_vbus_volts > VBUS_CHOP_OFF_OV_V && g_mode != MODE_IDLE) {
+            // CHOP_OFF overvoltage cutoff (>27.5V) protects 24V supply/caps while chopper is disconnected
+            stopAllImmediate();
+            g_espnow_fault_lockout = true;
+            g_motion_msg_code      = 5;
+            g_motion_msg_val       = g_vbus_volts;
+        }
     }
+
+    evaluateSafetySupervisor(millis());
 
     // Cool surge timer during non-current-controlled modes so thermal memory stays accurate
     if (!isCurrentControlledMode(g_mode)) {
         (void)updateSurgeFoldbackTarget(0.0f);
     }
-
-    // Passive MY1016 + 52:1 gearbox torque and pad-force estimation
-    float tau_em_gbx = GEAR_RATIO * GEAR_EFFICIENCY * KT_MOTOR_NM_PER_A * g_motor_current_a;
-    g_gbx_torque_nm  = constrain(tau_em_gbx, -GBX_MAX_TORQUE_NM, GBX_MAX_TORQUE_NM);
-    g_knee_torque_nm = (g_gamma_factor > 0.1f) ? (g_gbx_torque_nm / g_gamma_factor) : g_gbx_torque_nm;
-    g_pad_force_n    = (g_L_leg_m > 0.05f) ? (g_knee_torque_nm / g_L_leg_m) : 0.0f;
+    if (g_mode != MODE_ISOTONIC && g_mode != MODE_ISOKINETIC && g_mode != MODE_ISOMETRIC) {
+        g_active_target_curve_nm = 0.0f;
+    }
 
     switch (g_mode) {
         case MODE_IDLE:
         default: {
             applyMotorOutput(0, 0);
+            digitalWrite(PIN_MD_DIR, LOW);
             updateBrakeChopper(g_vbus_volts);
             break;
         }
@@ -1183,14 +2157,14 @@ static void runControlStep500Hz() {
                 g_dirtest_dir_flip  = false;
                 g_dirtest_acs_flip  = false;
 
-                int64_t fwd_logical = g_dirtest_fwd_dcnt * (int64_t)g_enc_polarity;
-                int64_t rev_logical = g_dirtest_rev_dcnt * (int64_t)g_enc_polarity;
-                bool opp_dirs = (fwd_logical > 10 && rev_logical < -10) ||
-                                (fwd_logical < -10 && rev_logical > 10);
+                float fwd_deg = (float)g_dirtest_fwd_dcnt * (float)g_enc_polarity * DEG_PER_COUNT;
+                float rev_deg = (float)g_dirtest_rev_dcnt * (float)g_enc_polarity * DEG_PER_COUNT;
+                bool opp_dirs = (fwd_deg > 2.5f && rev_deg < -2.5f) ||
+                                (fwd_deg < -2.5f && rev_deg > 2.5f);
                 g_dirtest_bidir_ok = opp_dirs;
 
                 if (opp_dirs) {
-                    int8_t new_dp = (fwd_logical > 10) ? +1 : -1;
+                    int8_t new_dp = (fwd_deg > 2.5f) ? +1 : -1;
                     if (new_dp != g_dir_polarity) {
                         g_dir_polarity     = new_dp;
                         g_dirtest_dir_flip = true;
@@ -1267,9 +2241,14 @@ static void runControlStep500Hz() {
 
             if (g_home_phase == 1) {
                 if (g_acs_valid && fabsf(g_motor_current_a) > 10.0f) {
+                    if (g_obst_ticks < 100U) g_obst_ticks++;
+                } else {
+                    g_obst_ticks = 0;
+                }
+                if (elapsed_ms >= 100U && g_obst_ticks >= 15U) { // >10A sustained 30ms past startup inrush
                     stopAllImmediate();
                     g_homing_msg_code = 4;
-                } else if ((g_enc_counts - g_home_start_cnt) > 24) {
+                } else if (((float)(g_enc_counts - g_home_start_cnt) * DEG_PER_COUNT) > 6.0f) {
                     // Moved > +6 deg toward +Flexion instead of -Extension
                     stopAllImmediate();
                     g_homing_msg_code = 2;
@@ -1353,8 +2332,9 @@ static void runControlStep500Hz() {
                 if (g_obst_ticks < 1000) g_obst_ticks++;
                 if (g_obst_ticks >= 750) { // 1.5s blocked
                     stopAllImmediate();
-                    g_motion_msg_code = 2;
-                    g_motion_msg_val  = g_theta_k_deg;
+                    g_espnow_fault_lockout = true;
+                    g_motion_msg_code      = 2;
+                    g_motion_msg_val       = g_theta_k_deg;
                     updateBrakeChopper(g_vbus_volts);
                     break;
                 }
@@ -1384,6 +2364,32 @@ static void runControlStep500Hz() {
             float ref_wk = 0.0f;
             float step   = g_cpm_speed_degs * CONTROL_DT_SEC;
             uint32_t now_ms = millis();
+
+            if (g_in_spasm_backoff) {
+                float err_b  = g_backoff_target_tk - g_traj_target_tk;
+                float b_step = 10.0f * CONTROL_DT_SEC;
+                float b_wk   = 0.0f;
+                if (fabsf(err_b) <= b_step) {
+                    g_traj_target_tk = g_backoff_target_tk;
+                } else if (err_b > 0.0f) {
+                    g_traj_target_tk += b_step;
+                    b_wk              = 10.0f;
+                } else {
+                    g_traj_target_tk -= b_step;
+                    b_wk              = -10.0f;
+                }
+                float i_cmd = computePositionAssistCurrent(g_traj_target_tk, b_wk, 0, 0.6f * g_assist_max_i_a);
+                executeBidirectionalCurrentControl(i_cmd, g_omega_m_deg_s);
+                updateBrakeChopper(g_vbus_volts);
+                if ((fabsf(g_theta_k_deg - g_backoff_target_tk) <= 1.2f &&
+                     (uint32_t)(now_ms - g_cpm_dwell_ms) >= 350U) ||
+                    (uint32_t)(now_ms - g_cpm_dwell_ms) >= 1500U) {
+                    bool keep_spasm = g_spasm_latched;
+                    stopAllImmediate();
+                    g_spasm_latched = keep_spasm;
+                }
+                break;
+            }
 
             if (g_cpm_phase == 0) { // Flexion toward g_rom_max_deg
                 g_traj_target_tk += step;
@@ -1427,8 +2433,9 @@ static void runControlStep500Hz() {
                 if (g_obst_ticks < 1000) g_obst_ticks++;
                 if (g_obst_ticks >= 500) { // 1.0s obstruction/spasm cutoff
                     stopAllImmediate();
-                    g_motion_msg_code = 4;
-                    g_motion_msg_val  = g_theta_k_deg;
+                    g_espnow_fault_lockout = true;
+                    g_motion_msg_code      = 4;
+                    g_motion_msg_val       = g_theta_k_deg;
                     updateBrakeChopper(g_vbus_volts);
                     break;
                 }
@@ -1574,6 +2581,118 @@ static void runControlStep500Hz() {
             updateBrakeChopper(g_vbus_volts);
             break;
         }
+
+        case MODE_ISOTONIC: {
+            float kt_gbx       = GEAR_RATIO * GEAR_EFFICIENCY * KT_MOTOR_NM_PER_A;
+            float wk           = g_omega_k_deg_s;
+            float tau_knee_cmd = 0.0f;
+
+            if (wk < -1.0f) { // Patient extending -> Quad resistance (+Flexion motor torque)
+                float blend = constrain((-wk - 1.0f) / 4.0f, 0.0f, 1.0f);
+                float tau_c = computePhysiologicalTorqueTarget(g_theta_k_deg, g_iso_ext_nm, true, g_pathology_profile);
+                g_active_target_curve_nm = tau_c;
+                int8_t dsign = (tau_c > 0.01f) ? +1 : 0;
+                tau_knee_cmd = tau_c * blend * computeAntiBacklashFactor(dsign);
+            } else if (wk > 1.0f) { // Patient flexing -> Hamstring resistance (-Extension motor torque)
+                float blend = constrain((wk - 1.0f) / 4.0f, 0.0f, 1.0f);
+                float tau_c = computePhysiologicalTorqueTarget(g_theta_k_deg, g_iso_flex_nm, false, g_pathology_profile);
+                g_active_target_curve_nm = -tau_c;
+                int8_t dsign = (tau_c > 0.01f) ? -1 : 0;
+                tau_knee_cmd = -tau_c * blend * computeAntiBacklashFactor(dsign);
+            } else {
+                g_active_target_curve_nm = 0.0f;
+            }
+
+            if (g_theta_k_deg > g_rom_max_deg) {
+                tau_knee_cmd -= 1.2f * (g_theta_k_deg - g_rom_max_deg);
+            } else if (g_theta_k_deg < g_rom_min_deg) {
+                tau_knee_cmd += 1.2f * (g_rom_min_deg - g_theta_k_deg);
+            }
+
+            float i_cmd = constrain((tau_knee_cmd * g_gamma_factor) / kt_gbx,
+                                    -PEAK_CURRENT_LIMIT_A, PEAK_CURRENT_LIMIT_A);
+            executeBidirectionalCurrentControl(i_cmd, g_omega_m_deg_s);
+            updateRepTracker(g_theta_k_deg, g_omega_k_deg_s, -g_knee_torque_nm);
+            updateBrakeChopper(g_vbus_volts);
+            break;
+        }
+
+        case MODE_ISOKINETIC: {
+            float kt_gbx       = GEAR_RATIO * GEAR_EFFICIENCY * KT_MOTOR_NM_PER_A;
+            float wk           = g_omega_k_deg_s;
+            float v_onset      = 0.85f * g_isok_vel_degs;
+            float v_span       = fmaxf(0.25f * g_isok_vel_degs, 6.0f);
+            float tau_knee_cmd = 0.0f;
+
+            if (wk < -v_onset) {
+                float over  = (-wk) - v_onset;
+                float ramp  = constrain(over / v_span, 0.0f, 1.0f);
+                float tau_c = computePhysiologicalTorqueTarget(g_theta_k_deg, g_isok_ext_cap_nm, true, g_pathology_profile);
+                g_active_target_curve_nm = tau_c;
+                int8_t dsign = (tau_c > 0.01f) ? +1 : 0;
+                tau_knee_cmd = tau_c * ramp * computeAntiBacklashFactor(dsign);
+            } else if (wk > v_onset) {
+                float over  = wk - v_onset;
+                float ramp  = constrain(over / v_span, 0.0f, 1.0f);
+                float tau_c = computePhysiologicalTorqueTarget(g_theta_k_deg, g_isok_flex_cap_nm, false, g_pathology_profile);
+                g_active_target_curve_nm = -tau_c;
+                int8_t dsign = (tau_c > 0.01f) ? -1 : 0;
+                tau_knee_cmd = -tau_c * ramp * computeAntiBacklashFactor(dsign);
+            } else {
+                g_active_target_curve_nm = 0.0f;
+            }
+
+            if (g_theta_k_deg > g_rom_max_deg) {
+                tau_knee_cmd -= 1.2f * (g_theta_k_deg - g_rom_max_deg);
+            } else if (g_theta_k_deg < g_rom_min_deg) {
+                tau_knee_cmd += 1.2f * (g_rom_min_deg - g_theta_k_deg);
+            }
+
+            float i_cmd = constrain((tau_knee_cmd * g_gamma_factor) / kt_gbx,
+                                    -PEAK_CURRENT_LIMIT_A, PEAK_CURRENT_LIMIT_A);
+            executeBidirectionalCurrentControl(i_cmd, g_omega_m_deg_s);
+            updateRepTracker(g_theta_k_deg, g_omega_k_deg_s, -g_knee_torque_nm);
+            updateBrakeChopper(g_vbus_volts);
+            break;
+        }
+
+        case MODE_ISOMETRIC: {
+            float kt_gbx    = GEAR_RATIO * GEAR_EFFICIENCY * KT_MOTOR_NM_PER_A;
+            float err_slew  = g_isom_angle_tk - g_traj_target_tk;
+            float slew_step = 25.0f * CONTROL_DT_SEC;
+            if (fabsf(err_slew) <= slew_step) {
+                g_traj_target_tk = g_isom_angle_tk;
+            } else {
+                g_traj_target_tk += (err_slew > 0.0f) ? slew_step : -slew_step;
+            }
+
+            float tau_knee_cmd     = 1.60f * (g_traj_target_tk - g_theta_k_deg) - 0.12f * g_omega_k_deg_s;
+            bool  is_resisting_ext = (tau_knee_cmd >= 0.0f);
+            float tau_cap          = computePhysiologicalTorqueTarget(g_theta_k_deg, g_isom_max_nm,
+                                                                      is_resisting_ext, g_pathology_profile);
+            if (tau_cap < 1.0f) tau_cap = 1.0f;
+            g_active_target_curve_nm = is_resisting_ext ? tau_cap : -tau_cap;
+            tau_knee_cmd             = constrain(tau_knee_cmd, -tau_cap, tau_cap);
+
+            float i_cmd = constrain((tau_knee_cmd * g_gamma_factor) / kt_gbx,
+                                    -PEAK_CURRENT_LIMIT_A, PEAK_CURRENT_LIMIT_A);
+            executeBidirectionalCurrentControl(i_cmd, g_omega_m_deg_s);
+            updateBrakeChopper(g_vbus_volts);
+            break;
+        }
+
+        case MODE_HARDSTOP_LOCK: {
+            float kt_gbx       = GEAR_RATIO * GEAR_EFFICIENCY * KT_MOTOR_NM_PER_A;
+            float err_tm       = g_freeze_theta_m_deg - g_theta_m_deg;
+            float tau_gbx_hold = 2.0f * err_tm - 0.12f * g_omega_m_deg_s;
+            float max_gbx_hold = HARDSTOP_LOCK_MAX_NM * g_gamma_factor;
+            tau_gbx_hold       = constrain(tau_gbx_hold, -max_gbx_hold, max_gbx_hold);
+
+            float i_hold = constrain(tau_gbx_hold / kt_gbx, -PEAK_CURRENT_LIMIT_A, PEAK_CURRENT_LIMIT_A);
+            executeBidirectionalCurrentControl(i_hold, g_omega_m_deg_s);
+            updateBrakeChopper(g_vbus_volts);
+            break;
+        }
     }
 
     uint32_t dt_us = micros() - t_start;
@@ -1596,6 +2715,14 @@ static void printHelp() {
     Serial.println("  cpm [spd] [cycles]  : Continuous Passive Motion within ROM (default 18 deg/s)");
     Serial.println("  assist [auto] [spd] : Active Assist (wait patient nudge, yield-forward; or 'assist auto')");
     Serial.println("  goto <deg> [spd]    : Closed-loop move & hold at knee deg (0..120 deg)");
+    Serial.println("  iso [extNm] [flexNm]: Clinical Isotonic curve resistance (default 18 / 12 Nm; 0=free)");
+    Serial.println("  isok [vel] [e] [f]  : Accommodating Isokinetic ceiling (default 45 deg/s, 18/12 Nm)");
+    Serial.println("  isom [deg] [maxNm]  : Multi-angle Isometric hold (default 60 deg, 25 Nm)");
+    Serial.println("  path [std|acl|tka|pfps] : Pathology torque curve (acl tapers 40->0 deg ext shear)");
+    Serial.println("  lock / release      : Compliant electronic hard-stop (75N yield) / zero-torque release");
+    Serial.println("  safety [on|off]     : Toggle clinical spasm/catch/clonus detectors (HW OC/OV/EStop ON)");
+    Serial.println("  wifi [on|off|ch N]  : Enable/disable ESP-NOW Wi-Fi or set channel 1..13 (saved NVS)");
+    Serial.println("  espnow              : Show U2 MAC, U1 Master link state & ESP-NOW TX/RX counters");
     Serial.println("  rom [min max|reset] : Show or set soft ROM limits (deg, default 5..90) -> NVS");
     Serial.println("  assistcfg [kp kd Imax [grav]] : Show/tune knee PD, Imax & gravity FF (or 'reset')");
     Serial.printf("  iref <%.0f..%.0f>     : Closed-loop signed current (A; >%.0fA <%.0fs surge); 'iref 0' -> IDLE\n",
@@ -1672,6 +2799,9 @@ static void handleCommand(char *line) {
 
     if (strcmp(line, "s") == 0 || strcmp(line, "stop") == 0) {
         stopAllImmediate();
+        g_spasm_latched          = false;
+        g_espnow_fault_lockout   = false;
+        g_espnow_oneshot_latched = false;
         Serial.println("[CMD] STOP -> MODE_IDLE (Motor 0%, Chopper 0%)");
     } else if (strcmp(line, "h") == 0 || strcmp(line, "?") == 0) {
         printHelp();
@@ -1694,6 +2824,7 @@ static void handleCommand(char *line) {
     } else if (strcmp(line, "nvs_clear") == 0) {
         stopAllImmediate();
         clearCalibrationNVS();
+        (void)initEspNowLink();
         Serial.println("[NVS] Cleared namespace and restored Stage 3 defaults (d_off=0.250m, L_leg=0.300m).");
         printNvsStatus();
     } else if (strcmp(line, "cal") == 0) {
@@ -2155,6 +3286,7 @@ static void handleCommand(char *line) {
         spd = constrain(spd, 5.0f, 45.0f);
 
         stopAllImmediate();
+        g_spasm_latched     = false;
         g_traj_target_tk    = g_theta_k_deg;
         g_goto_goal_tk      = goal_tk;
         g_goto_speed_degs   = spd;
@@ -2190,6 +3322,7 @@ static void handleCommand(char *line) {
         spd = constrain(spd, 5.0f, 45.0f);
 
         stopAllImmediate();
+        g_spasm_latched     = false;
         g_cpm_speed_degs    = spd;
         g_cpm_target_cycles = cyc;
         g_cpm_done_cycles   = 0;
@@ -2220,6 +3353,7 @@ static void handleCommand(char *line) {
         spd = constrain(spd, 5.0f, 45.0f);
 
         stopAllImmediate();
+        g_spasm_latched     = false;
         g_assist_auto_cycle = auto_cyc;
         g_assist_speed_degs = spd;
         g_assist_anchor_tk  = g_theta_k_deg;
@@ -2243,6 +3377,212 @@ static void handleCommand(char *line) {
                           g_rom_min_deg, g_rom_max_deg, g_assist_speed_degs, g_assist_max_i_a);
             Serial.printf("[ASSIST] Nudge %s%.2f deg to trigger stroke (or run 'assist auto').\n",
                           (g_assist_phase == 0) ? "+" : "-", ASSIST_NUDGE_TRIG_DEG);
+        }
+    } else if (strncmp(line, "iso", 3) == 0 && (line[3] == ' ' || line[3] == '\0')) {
+        if (!g_is_homed) {
+            Serial.println("[ISO] Blocked: device not homed. Run 'autohome' (or 'home <deg>') first.");
+            return;
+        }
+        const char *arg = &line[3];
+        while (*arg == ' ' || *arg == '\t') arg++;
+        float ext_nm  = g_iso_ext_nm;
+        float flex_nm = g_iso_flex_nm;
+        if (*arg != '\0') {
+            char *p1 = nullptr;
+            ext_nm = strtof(arg, &p1);
+            if (p1 == arg || !isfinite(ext_nm) || ext_nm < 0.0f || ext_nm > 45.0f) {
+                Serial.println("[CMD] Usage: iso [ext_Nm 0..45] [flex_Nm 0..45]");
+                return;
+            }
+            while (*p1 == ' ' || *p1 == '\t') p1++;
+            if (*p1 != '\0') {
+                char *p2 = nullptr;
+                flex_nm = strtof(p1, &p2);
+                if (p2 == p1 || !isfinite(flex_nm) || flex_nm < 0.0f || flex_nm > 45.0f) {
+                    Serial.println("[CMD] Usage: iso [ext_Nm 0..45] [flex_Nm 0..45]");
+                    return;
+                }
+            }
+        }
+        stopAllImmediate();
+        g_spasm_latched = false;
+        g_iso_ext_nm    = ext_nm;
+        g_iso_flex_nm   = flex_nm;
+        resetRepAccumulators();
+        g_mode = MODE_ISOTONIC;
+        Serial.printf("[ISO] Isotonic active (%s curve): Quad=%.1f Nm | Ham=%.1f Nm | ROM=%.1f..%.1f deg ('s' to stop)\n",
+                      pathologyName(g_pathology_profile), g_iso_ext_nm, g_iso_flex_nm, g_rom_min_deg, g_rom_max_deg);
+    } else if (strncmp(line, "isok", 4) == 0 && (line[4] == ' ' || line[4] == '\0')) {
+        if (!g_is_homed) {
+            Serial.println("[ISOK] Blocked: device not homed. Run 'autohome' (or 'home <deg>') first.");
+            return;
+        }
+        const char *arg = &line[4];
+        while (*arg == ' ' || *arg == '\t') arg++;
+        float vel = g_isok_vel_degs;
+        float e_cap = g_isok_ext_cap_nm;
+        float f_cap = g_isok_flex_cap_nm;
+        if (*arg != '\0') {
+            char *p1 = nullptr;
+            vel = strtof(arg, &p1);
+            if (p1 == arg || !isfinite(vel) || vel < 10.0f || vel > 180.0f) {
+                Serial.println("[CMD] Usage: isok [vel 10..180 deg/s] [ext_cap 0..45 Nm] [flex_cap 0..45 Nm]");
+                return;
+            }
+            while (*p1 == ' ' || *p1 == '\t') p1++;
+            if (*p1 != '\0') {
+                char *p2 = nullptr;
+                e_cap = strtof(p1, &p2);
+                if (p2 == p1 || !isfinite(e_cap) || e_cap < 0.0f || e_cap > 45.0f) {
+                    Serial.println("[CMD] Usage: isok [vel 10..180 deg/s] [ext_cap 0..45 Nm] [flex_cap 0..45 Nm]");
+                    return;
+                }
+                while (*p2 == ' ' || *p2 == '\t') p2++;
+                if (*p2 != '\0') {
+                    char *p3 = nullptr;
+                    f_cap = strtof(p2, &p3);
+                    if (p3 == p2 || !isfinite(f_cap) || f_cap < 0.0f || f_cap > 45.0f) {
+                        Serial.println("[CMD] Usage: isok [vel 10..180 deg/s] [ext_cap 0..45 Nm] [flex_cap 0..45 Nm]");
+                        return;
+                    }
+                }
+            }
+        }
+        stopAllImmediate();
+        g_spasm_latched    = false;
+        g_isok_vel_degs    = vel;
+        g_isok_ext_cap_nm  = e_cap;
+        g_isok_flex_cap_nm = f_cap;
+        resetRepAccumulators();
+        g_mode = MODE_ISOKINETIC;
+        Serial.printf("[ISOK] Isokinetic active (%s curve): Vlim=%.1f deg/s | Caps=%.1f/%.1f Nm | ROM=%.1f..%.1f deg\n",
+                      pathologyName(g_pathology_profile), g_isok_vel_degs,
+                      g_isok_ext_cap_nm, g_isok_flex_cap_nm, g_rom_min_deg, g_rom_max_deg);
+    } else if (strncmp(line, "isom", 4) == 0 && (line[4] == ' ' || line[4] == '\0')) {
+        if (!g_is_homed) {
+            Serial.println("[ISOM] Blocked: device not homed. Run 'autohome' (or 'home <deg>') first.");
+            return;
+        }
+        const char *arg = &line[4];
+        while (*arg == ' ' || *arg == '\t') arg++;
+        float hold_deg = g_isom_angle_tk;
+        float max_nm   = g_isom_max_nm;
+        if (*arg != '\0') {
+            char *p1 = nullptr;
+            hold_deg = strtof(arg, &p1);
+            if (p1 == arg || !isfinite(hold_deg) || hold_deg < ROM_ABS_MIN_DEG || hold_deg > ROM_ABS_MAX_DEG) {
+                Serial.printf("[CMD] Usage: isom [angle %.0f..%.0f deg] [max_Nm 1..45]\n",
+                              ROM_ABS_MIN_DEG, ROM_ABS_MAX_DEG);
+                return;
+            }
+            while (*p1 == ' ' || *p1 == '\t') p1++;
+            if (*p1 != '\0') {
+                char *p2 = nullptr;
+                max_nm = strtof(p1, &p2);
+                if (p2 == p1 || !isfinite(max_nm) || max_nm < 1.0f || max_nm > 45.0f) {
+                    Serial.println("[CMD] Usage: isom [angle 0..120 deg] [max_Nm 1..45]");
+                    return;
+                }
+            }
+        }
+        stopAllImmediate();
+        g_spasm_latched  = false;
+        g_isom_angle_tk  = constrain(hold_deg, g_rom_min_deg, g_rom_max_deg);
+        g_isom_max_nm    = max_nm;
+        g_traj_target_tk = g_theta_k_deg;
+        g_mode           = MODE_ISOMETRIC;
+        Serial.printf("[ISOM] Isometric hold -> Tk=%.1f deg (max %.1f Nm, %s curve; 's' to release)\n",
+                      g_isom_angle_tk, g_isom_max_nm, pathologyName(g_pathology_profile));
+    } else if (strncmp(line, "path", 4) == 0 && (line[4] == ' ' || line[4] == '\0')) {
+        const char *arg = &line[4];
+        while (*arg == ' ' || *arg == '\t') arg++;
+        if (*arg == '\0') {
+            Serial.printf("[PATH] Active profile: %s (%u) [options: std | acl | tka | pfps]\n",
+                          pathologyName(g_pathology_profile), (unsigned)g_pathology_profile);
+            return;
+        }
+        if (strcmp(arg, "std") == 0) {
+            g_pathology_profile = PATH_STANDARD;
+        } else if (strcmp(arg, "acl") == 0) {
+            g_pathology_profile = PATH_ACL_PROTECTED;
+        } else if (strcmp(arg, "tka") == 0) {
+            g_pathology_profile = PATH_TKA;
+        } else if (strcmp(arg, "pfps") == 0) {
+            g_pathology_profile = PATH_PFPS;
+        } else {
+            Serial.println("[CMD] Usage: path [std|acl|tka|pfps]");
+            return;
+        }
+        Serial.printf("[PATH] Set pathology profile -> %s (%s)\n",
+                      pathologyName(g_pathology_profile),
+                      (g_pathology_profile == PATH_ACL_PROTECTED) ? "40->0 deg extension shear taper" : "clinical torque scaling");
+    } else if (strcmp(line, "lock") == 0) {
+        engageHardStopLock(false);
+    } else if (strcmp(line, "release") == 0) {
+        if (g_mode == MODE_HARDSTOP_LOCK || g_hardstop_locked) {
+            releaseHardStopLock();
+        } else {
+            stopAllImmediate();
+            g_spasm_latched          = false;
+            g_espnow_fault_lockout   = false;
+            g_espnow_oneshot_latched = false;
+            Serial.println("[CMD] Zero-torque freewheel release -> MODE_IDLE.");
+        }
+    } else if (strncmp(line, "safety", 6) == 0 && (line[6] == ' ' || line[6] == '\0')) {
+        const char *arg = &line[6];
+        while (*arg == ' ' || *arg == '\t') arg++;
+        if (*arg == '\0') {
+            Serial.printf("[SAFE] Clinical spasm/catch/clonus detectors: %s (HW OC/OV/EStop/Watchdog ALWAYS ON)\n",
+                          g_safety_spasm_en ? "ON" : "OFF");
+            return;
+        }
+        if (strcmp(arg, "on") == 0) {
+            g_safety_spasm_en = true;
+        } else if (strcmp(arg, "off") == 0) {
+            g_safety_spasm_en = false;
+        } else {
+            Serial.println("[CMD] Usage: safety [on|off]");
+            return;
+        }
+        Serial.printf("[SAFE] Clinical spasm/catch/clonus detectors -> %s (HW OC >25A/500ms, OV, EStop ALWAYS ON)\n",
+                      g_safety_spasm_en ? "ON" : "OFF");
+    } else if (strcmp(line, "espnow") == 0) {
+        printEspNowStatus();
+    } else if (strncmp(line, "wifi", 4) == 0 && (line[4] == ' ' || line[4] == '\0')) {
+        const char *arg = &line[4];
+        while (*arg == ' ' || *arg == '\t') arg++;
+        if (*arg == '\0') {
+            printEspNowStatus();
+            return;
+        }
+        if (strcmp(arg, "on") == 0) {
+            g_wifi_enabled = true;
+            saveCalibrationToNVS();
+            bool ok = initEspNowLink();
+            Serial.printf("[WIFI] Enabled on Ch %u (NVS saved): ESP-NOW %s\n",
+                          (unsigned)g_wifi_channel, ok ? "READY" : "FAILED");
+            printEspNowStatus();
+        } else if (strcmp(arg, "off") == 0) {
+            g_wifi_enabled     = false;
+            g_ctrl_from_espnow = false;
+            saveCalibrationToNVS();
+            deinitEspNowLink();
+            Serial.println("[WIFI] Disabled & saved to NVS (local Serial CLI mode only; press EN/reset once for clean WiFi-off cold boot).");
+        } else if (strncmp(arg, "ch", 2) == 0 && (arg[2] == ' ' || arg[2] == '\t')) {
+            int ch = 0;
+            if (!parseOptionalInt(&arg[2], REHAB_WIFI_CHANNEL, &ch) || ch < 1 || ch > 13) {
+                Serial.println("[CMD] Usage: wifi ch <1..13>");
+                return;
+            }
+            g_wifi_channel = (uint8_t)ch;
+            saveCalibrationToNVS();
+            if (g_wifi_enabled) {
+                (void)initEspNowLink();
+            }
+            Serial.printf("[WIFI] Channel set to %u (saved to NVS).\n", (unsigned)g_wifi_channel);
+            printEspNowStatus();
+        } else {
+            Serial.println("[CMD] Usage: wifi [on|off|ch <1..13>]");
         }
     } else {
         Serial.printf("[CMD] Unknown command '%s'. Type 'h' for help.\n", line);
@@ -2318,6 +3658,22 @@ static void pollSerial() {
 // ----------------------------------------------------------------------------
 // 10. SETUP & COOPERATIVE 500 Hz LOOP
 // ----------------------------------------------------------------------------
+static const char *resetReasonName(esp_reset_reason_t r) {
+    switch (r) {
+        case ESP_RST_POWERON:   return "POWERON";
+        case ESP_RST_EXT:       return "EXT_PIN";
+        case ESP_RST_SW:        return "SW_RESET";
+        case ESP_RST_PANIC:     return "PANIC";
+        case ESP_RST_INT_WDT:   return "INT_WDT";
+        case ESP_RST_TASK_WDT:  return "TASK_WDT";
+        case ESP_RST_WDT:       return "WDT";
+        case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+        case ESP_RST_BROWNOUT:  return "BROWNOUT";
+        case ESP_RST_SDIO:      return "SDIO";
+        default:                return "UNKNOWN";
+    }
+}
+
 void setup() {
     initPWM();
     stopAllImmediate();
@@ -2330,12 +3686,19 @@ void setup() {
     }
     g_cmd_len = 0;
 
-    Serial.printf("\n[BOOT] U2 (ESP_TOPHUB) Stage %d starting...\n", FW_STAGE);
+    esp_reset_reason_t rst = esp_reset_reason();
+    Serial.printf("\n[BOOT] U2 (ESP_TOPHUB) Stage %d starting... (reset=%s [%d])\n",
+                  FW_STAGE, resetReasonName(rst), (int)rst);
+    if (rst == ESP_RST_BROWNOUT) {
+        Serial.println("[WARN] Last reset was ESP_RST_BROWNOUT — inspect 5V/3.3V bulk decoupling caps!");
+    }
 
     analogReadResolution(12);
     analogSetPinAttenuation(PIN_VBUS_SENSE, ADC_11db);
     analogSetPinAttenuation(PIN_ACS712_SENSE, ADC_11db);
     delay(50);
+
+    float acs_mv_pre_wifi = readAveragedMilliVolts(PIN_ACS712_SENSE, 64);
 
     loadCalibrationFromNVS();
     if (!g_cal_valid) {
@@ -2343,6 +3706,16 @@ void setup() {
     }
 
     initEncoderPCNT();
+    if (g_wifi_enabled) {
+        if (!initEspNowLink()) {
+            Serial.println("[WARN] ESP-NOW init failed — continuing in Serial CLI mode.");
+        }
+        delay(20);
+    }
+    float acs_mv_post_wifi = readAveragedMilliVolts(PIN_ACS712_SENSE, 64);
+    if (!g_cal_valid && acs_mv_post_wifi >= 300.0f && acs_mv_post_wifi <= 2850.0f) {
+        g_acs_zero_mv = acs_mv_post_wifi;
+    }
     sampleAnalogSensors500Hz();
 
     printHelp();
@@ -2356,14 +3729,19 @@ void setup() {
                       g_acs_zero_mv);
     }
     printAdcDiagnostics();
+    Serial.printf("[DIAG][BOOT] ACS35: preWiFi=%.1f mV -> postWiFi=%.1f mV (delta=%+.1f mV) | zero=%.1f mV (cal=%d) | pwmAtt=%d\n",
+                  acs_mv_pre_wifi, acs_mv_post_wifi, acs_mv_post_wifi - acs_mv_pre_wifi,
+                  g_acs_zero_mv, g_cal_valid ? 1 : 0, s_motor_pwm_attached ? 1 : 0);
     printEncDiagnostics(false);
+    printEspNowStatus();
     Serial.printf("[INFO] Cytron MDD10A (GPIO%d PWM / GPIO%d DIR) | Sign-Magnitude @ %lu Hz | %.0fA cont / %.0fA (<%.0fs) surge / %.0fA (%ums) OC cut.\n",
                   PIN_MD_PWM, PIN_MD_DIR, (unsigned long)g_md_pwm_freq_hz,
                   CONT_CURRENT_LIMIT_A, PEAK_CURRENT_LIMIT_A, PEAK_SURGE_MAX_S,
                   HW_OVERCURRENT_CUT_A, (unsigned)HW_OVERCURRENT_MS);
-    Serial.printf("[INFO] Stage %d Active Assist ready: ROM=%.1f..%.1f deg | Chopper OFF (OV cut >%.1fV).\n",
-                  FW_STAGE, g_rom_min_deg, g_rom_max_deg, VBUS_CHOP_OFF_OV_V);
-    Serial.println("[INFO] Run 'autohome' (or 'home <deg>') before 'assist', 'cpm', or 'goto'.");
+    Serial.printf("[INFO] Stage %d Clinical + ESP-NOW ready: ROM=%.1f..%.1f deg | Path=%s | Safety=%s | Chopper OFF (OV >%.1fV).\n",
+                  FW_STAGE, g_rom_min_deg, g_rom_max_deg, pathologyName(g_pathology_profile),
+                  g_safety_spasm_en ? "ON" : "OFF", VBUS_CHOP_OFF_OV_V);
+    Serial.println("[INFO] Run 'autohome' (or 'home <deg>') before 'assist', 'cpm', 'goto', 'iso', 'isok', or 'isom'.");
     while (Serial.available() > 0) {
         Serial.read();
     }
@@ -2372,8 +3750,10 @@ void setup() {
 }
 
 void loop() {
-    static uint32_t last_ctrl_us  = 0;
-    static uint32_t last_print_ms = 0;
+    static uint32_t last_ctrl_us      = 0;
+    static uint32_t last_print_ms     = 0;
+    static uint32_t last_espnow_ms    = 0;
+    static uint32_t last_idle_warn_ms = 0;
 
     uint32_t now_us = micros();
     if ((uint32_t)(now_us - last_ctrl_us) >= CONTROL_PERIOD_US) {
@@ -2387,6 +3767,12 @@ void loop() {
 
     pollSerial();
 
+    if (g_wifi_enabled && g_espnow_ready &&
+        (uint32_t)(millis() - last_espnow_ms) >= ESPNOW_TELEM_PERIOD_MS) {
+        last_espnow_ms = millis();
+        sendEspNowTelemetry50Hz();
+    }
+
     if (g_nvs_save_pending) {
         g_nvs_save_pending = false;
         saveCalibrationToNVS();
@@ -2394,7 +3780,8 @@ void loop() {
 
     if (g_acs_pol_warn_pending) {
         g_acs_pol_warn_pending = false;
-        Serial.println("[WARN] ACS712 sign opposes drive current — PI paused (using FF). Run 'pol acs -1' or 'dirtest' to align.");
+        Serial.printf("[WARN] ACS712 sign opposes drive current (I_meas=%+.2fA vs I_ref=%+.2fA) — PI paused (using FF). Run 'pol acs %+d' or 'dirtest' to align.\n",
+                      g_motor_current_a, g_active_iref_a, (g_acs_polarity > 0) ? -1 : 1);
     }
 
     if (g_overspeed_msg_pend) {
@@ -2482,16 +3869,58 @@ void loop() {
         }
     }
 
+    if (g_safety_msg_code != 0) {
+        uint8_t code = g_safety_msg_code;
+        float   val  = g_safety_msg_val;
+        g_safety_msg_code = 0;
+        if (code == 1) {
+            Serial.printf("[SAFETY] ABS OVERVOLTAGE FAULT (VBUS=%.2f V > %.1f V) -> IDLE & Chopper 100%%!\n",
+                          val, VBUS_ABS_OV_FAULT_V);
+        } else if (code == 2) {
+            Serial.printf("[SAFETY] Spasm rapid force transient detected (dF/dt=%.0f N/s, F=%+.1f N, I=%+.2f A, raw=%.1f mV) -> IDLE (spasm latched).\n",
+                          val, g_safety_trip_f_n, g_safety_trip_i_a, g_safety_trip_mv);
+        } else if (code == 3) {
+            Serial.printf("[SAFETY] CPM joint-catch at Tk=%.1f deg -> 4 deg relief backoff.\n", val);
+        } else if (code == 4) {
+            Serial.printf("[SAFETY] Residual current spike while stalled (I=%.2f A) -> IDLE (spasm latched).\n", val);
+        } else if (code == 5) {
+            Serial.printf("[SAFETY] Clonus oscillation detected (%.0f reversals/s) -> IDLE (spasm latched).\n", val);
+        } else if (code == 6) {
+            Serial.printf("[SAFETY] U1 ESP-NOW heartbeat timeout (>%.0f ms) -> safe MODE_IDLE.\n", val);
+        } else if (code == 7) {
+            Serial.printf("[SAFETY] Electronic Hard-Stop LOCKED at Tk=%.1f deg (%.0f N compliant yield; 'release' or 's' to unlock).\n",
+                          val, (g_L_leg_m > 0.05f) ? (HARDSTOP_LOCK_MAX_NM / g_L_leg_m) : 75.0f);
+        } else if (code == 8) {
+            Serial.printf("[SAFETY] Hard-Stop RELEASED at Tk=%.1f deg -> zero-torque MODE_IDLE.\n", val);
+        }
+    }
+
+    if (g_espnow_evt_code != 0) {
+        uint8_t code = g_espnow_evt_code;
+        g_espnow_evt_code = 0;
+        if (code == 1) {
+            Serial.printf("[ESPNOW] U1 Master LINKED (%02X:%02X:%02X:%02X:%02X:%02X) on Ch %u!\n",
+                          g_master_mac[0], g_master_mac[1], g_master_mac[2],
+                          g_master_mac[3], g_master_mac[4], g_master_mac[5],
+                          (unsigned)g_wifi_channel);
+        } else if (code == 2) {
+            Serial.println("[ESPNOW] Remote clinical mode rejected: U2 is UNHOMED (send SETUP/Auto-Home first).");
+        }
+    }
+
     if (g_rep_done_msg) {
         g_rep_done_msg = false;
-        Serial.printf("[REP #%lu] ROM: %.1f..%.1f deg (span %.1f deg) | Peak Knee Tq: +%.2f / -%.2f Nm | Work: %.2f J\n",
+        Serial.printf("[REP #%lu] ROM: %.1f..%.1f deg (span %.1f) | PkFlex:+%.2f@%.1fdeg | PkExt:-%.2f@%.1fdeg | Work:%.2f J | VelCoV:%.1f%%\n",
                       (unsigned long)g_last_rep_num,
                       g_last_rep_min_tk,
                       g_last_rep_max_tk,
                       g_last_rep_max_tk - g_last_rep_min_tk,
                       g_last_rep_flex_nm,
+                      g_last_rep_ang_flex,
                       g_last_rep_ext_nm,
-                      g_last_rep_work_j);
+                      g_last_rep_ang_ext,
+                      g_last_rep_work_j,
+                      g_last_rep_cov_pct);
     }
 
     if (g_ctest_done_msg) {
@@ -2524,7 +3953,7 @@ void loop() {
                       (float)g_dirtest_rev_dcnt * DEG_PER_COUNT,
                       g_dirtest_rev_avg_i);
         if (!g_dirtest_bidir_ok) {
-            Serial.println("[DIRTEST] Bi-dir check incomplete (need >10 counts in opposite directions). Check stops, power, DIR wiring, or ENC1.");
+            Serial.println("[DIRTEST] Bi-dir check incomplete (need >2.5 deg in opposite directions). Check stops, power, DIR wiring, or ENC1.");
         } else {
             if (g_dirtest_dir_flip) {
                 Serial.printf("[DIRTEST] Auto-flipped dir_polarity to %+d (DIR=%s drives +angle/+Flexion; saved to NVS).\n",
@@ -2544,6 +3973,25 @@ void loop() {
                 }
             }
         }
+    }
+
+    if (g_mode == MODE_IDLE && (g_idle_spike_cnt > 0 || g_idle_enc_max_delta >= 4) &&
+        (uint32_t)(millis() - last_idle_warn_ms) >= 1000U) {
+        last_idle_warn_ms = millis();
+        float mv_lo = (g_idle_min_mv <= g_idle_max_mv) ? g_idle_min_mv : g_acs_raw_mv;
+        float mv_hi = (g_idle_min_mv <= g_idle_max_mv) ? g_idle_max_mv : g_acs_raw_mv;
+        Serial.printf("[DIAG][IDLE] ACS: cnt=%lu peak=%+.2f A (filt=%+.2f A, raw=%.0f..%.0f mV vs zero=%.1f mV, Vbus=%.2f V, dEnc=%lld, WiFi:%s, pwmAtt=%d)\n",
+                      (unsigned long)g_idle_spike_cnt, g_idle_peak_signed_a,
+                      g_motor_current_a, mv_lo, mv_hi, g_acs_zero_mv,
+                      g_vbus_volts, (long long)g_idle_enc_max_delta,
+                      g_wifi_enabled ? "ON" : "OFF", s_motor_pwm_attached ? 1 : 0);
+        g_idle_spike_cnt     = 0;
+        g_idle_peak_raw_i_a  = 0.0f;
+        g_idle_peak_signed_a = 0.0f;
+        g_idle_min_mv        = 9999.0f;
+        g_idle_max_mv        = 0.0f;
+        g_idle_enc_ref       = g_enc_counts;
+        g_idle_enc_max_delta = 0;
     }
 
     if (g_live_print && (uint32_t)(millis() - last_print_ms) >= TELEM_PERIOD_MS) {

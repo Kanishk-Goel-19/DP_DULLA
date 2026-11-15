@@ -26,16 +26,17 @@ enum PacketType : uint8_t {
 
 enum OperatingMode : uint8_t {
     OP_IDLE            = 0,
-    OP_SETUP_FULL_25S  = 1, // Full 6-Stage Calibration & Parameter ID
-    OP_SETUP_QUICK_6S  = 2, // Quick Static Zero + Hard-Stop Homing
-    OP_CPM             = 3, // Mode 1: Continuous Passive Motion + Spasm Backoff
-    OP_ISOTONIC        = 4, // Mode 2: Physiological Curve-Shaped Isotonic
-    OP_ISOKINETIC      = 5, // Mode 3: Accommodating Isokinetic
-    OP_ISOMETRIC       = 6, // Mode 4: Multi-Angle Isometric Hold
-    OP_CYCLE_TORQUE    = 7, // Bottom Tier: Constant Torque Cycling
-    OP_CYCLE_POWER     = 8, // Bottom Tier: Constant Power Ergometer
-    OP_DIRECT_PWM_TEST = 9, // Direct open-loop PWM bench test ("pwm 40" / "pwm -40")
-    OP_AUTO_BENCH_TEST = 10 // Automatic bidirectional bench test ("test")
+    OP_SETUP_FULL_25S  = 1,  // Full Calibration / Auto-Home
+    OP_SETUP_QUICK_6S  = 2,  // Quick Static Zero + Auto-Home
+    OP_CPM             = 3,  // Mode 1: Continuous Passive Motion + Spasm Backoff
+    OP_ISOTONIC        = 4,  // Mode 2: Physiological Curve-Shaped Isotonic
+    OP_ISOKINETIC      = 5,  // Mode 3: Accommodating Isokinetic
+    OP_ISOMETRIC       = 6,  // Mode 4: Multi-Angle Isometric Hold
+    OP_CYCLE_TORQUE    = 7,  // Bottom Tier: Constant Torque Cycling
+    OP_CYCLE_POWER     = 8,  // Bottom Tier: Constant Power Ergometer
+    OP_DIRECT_PWM_TEST = 9,  // Direct open-loop PWM bench test ("pwm 40" / "pwm -40")
+    OP_AUTO_BENCH_TEST = 10, // Automatic bidirectional bench test ("test")
+    OP_ACTIVE_ASSIST   = 11  // Patient-triggered / Auto Active-Assist (yield-forward)
 };
 
 enum PathologyProfile : uint8_t {
@@ -58,25 +59,25 @@ enum HardStopMode : uint8_t {
 #define STATE_FLAG_SPASM_STOP       (1 << 3)
 #define STATE_FLAG_HARDSTOP_LOCKED  (1 << 4)
 
-// 1. Master -> Worker Command Packet (40 Bytes)
+// 1. Master -> Worker Command Packet (37 Bytes packed)
 struct __attribute__((packed)) RehabCommandPacket_t {
     uint8_t  pkt_type;           // PKT_HEARTBEAT_CMD (0x10)
     uint8_t  target_node;        // NODE_TOPHUB or NODE_CYCLING
     uint16_t seq_num;            // Rolling sequence counter
-    uint8_t  op_mode;            // OperatingMode enum (0..8)
+    uint8_t  op_mode;            // OperatingMode enum (0..11)
     uint8_t  pathology_profile;  // PathologyProfile enum (0..3)
     uint8_t  estop_active;       // HardStopMode enum (0=NORMAL, 1=LOCKED, 2=RELEASE)
-    float    d_offset_m;         // Top-Hub vertical pivot offset above knee [m] (default 0.090m)
-    float    L_leg_m;            // Tibial pad distance from knee pivot [m] (default 0.300m)
-    float    rom_min_deg;        // Extension limit [deg] (e.g., 0.0 deg)
-    float    rom_max_deg;        // Flexion limit [deg] (e.g., 110.0 deg)
+    float    d_offset_m;         // Top-Hub vertical pivot offset [m]
+    float    L_leg_m;            // Tibial pad distance from knee pivot [m]
+    float    rom_min_deg;        // Extension limit [deg]
+    float    rom_max_deg;        // Flexion limit [deg]
     float    target_vel_deg_s;   // Target speed [deg/s] (Top Hub) or Target Cadence [RPM]
-    float    target_torque_ext;  // Peak Knee Extension Torque [N*m] (<=68 N*m)
-    float    target_torque_flex; // Peak Knee Flexion Torque [N*m] (<=40 N*m)
+    float    target_torque_ext;  // Peak Knee Extension Torque [N*m]
+    float    target_torque_flex; // Peak Knee Flexion Torque [N*m]
     uint16_t crc16;              // CRC-16-CCITT checksum
 };
 
-// 2. Top Hub (U2) -> Master Real-Time Telemetry Packet (48 Bytes @ 50 Hz)
+// 2. Top Hub (U2) -> Master Real-Time Telemetry Packet (45 Bytes packed @ 50 Hz)
 struct __attribute__((packed)) TopHubTelemetryPacket_t {
     uint8_t  pkt_type;           // PKT_TOPHUB_TELEMETRY (0x20)
     uint8_t  node_id;            // NODE_TOPHUB (0x02)
@@ -95,7 +96,7 @@ struct __attribute__((packed)) TopHubTelemetryPacket_t {
     uint16_t crc16;
 };
 
-// 3. Top Hub (U2) -> Master Per-Repetition Summary Packet (40 Bytes, Event-Driven)
+// 3. Top Hub (U2) -> Master Per-Repetition Summary Packet (37 Bytes packed, Event-Driven)
 struct __attribute__((packed)) TopHubRepSummaryPacket_t {
     uint8_t  pkt_type;           // PKT_TOPHUB_REP_SUMMARY (0x21)
     uint16_t rep_index;          // 1..N
