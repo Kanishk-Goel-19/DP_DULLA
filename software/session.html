@@ -21,30 +21,34 @@
     <div class="scrim"></div>
     <button class="video-play-button" id="videoPlayButton" type="button" hidden>Tap to play video</button>
 
-    <header class="topbar">
-      <div class="topbar-left">
-        <button class="menu-button glass" aria-label="Open menu" id="menuButton" type="button">
-          <span></span><span></span><span></span>
-        </button>
-        <button class="topbar-pill glass" id="pauseResumeBtn" type="button">Pause Session</button>
-        <button class="topbar-pill topbar-pill-end" id="endSessionBtn" type="button">End Session</button>
-        <a class="topbar-pill glass topbar-link" id="seeProgressLink" href="/progress">See Progress ↗</a>
-      </div>
-      <div class="status">
-        <span class="status-pill glass" id="rideStatusPill">Demo Ride</span>
-        <div class="time-block"><span>Time</span><strong id="clock">10:14 AM</strong></div>
-        <div class="battery" aria-label="Battery"><i></i></div>
-        <span class="battery-percent">78%</span>
-        <svg class="bluetooth" viewBox="0 0 24 24" aria-label="Bluetooth" role="img"><path d="M7 7l10 10-5 5V2l5 5L7 17" /></svg>
-      </div>
-    </header>
+    <div class="hud-top">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="menu-button glass" aria-label="Open menu" id="menuButton" type="button">
+            <span></span><span></span><span></span>
+          </button>
+          <button class="topbar-pill glass" id="pauseResumeBtn" type="button">Pause Session</button>
+          <button class="topbar-pill topbar-pill-end" id="endSessionBtn" type="button">End Session</button>
+          <a class="topbar-pill glass topbar-link" id="seeProgressLink" href="/progress">See Progress ↗</a>
+        </div>
+        <div class="status">
+          <span class="status-pill glass" id="rideStatusPill">Demo Ride</span>
+          <div class="time-block"><span>Time</span><strong id="clock">10:14 AM</strong></div>
+          <div class="battery" aria-label="Battery"><i></i></div>
+          <span class="battery-percent">78%</span>
+          <svg class="bluetooth" viewBox="0 0 24 24" aria-label="Bluetooth" role="img"><path d="M7 7l10 10-5 5V2l5 5L7 17" /></svg>
+        </div>
+      </header>
 
-    <div class="scene-label">
-      POV: <span id="sceneName">COASTAL FOREST</span>
-      <span class="scene-divider">·</span>
-      <span id="rideTimerText">00:00</span>
-      <span class="scene-divider">·</span>
-      <span id="rideRepsText">0 cycles</span>
+      <div class="scene-label">
+        POV: <span id="sceneName">COASTAL FOREST</span>
+        <span class="scene-divider">·</span>
+        <span id="rideTimerText">00:00</span>
+        <span class="scene-divider">·</span>
+        <span id="rideRepsText">0 cycles</span>
+      </div>
+
+      <div class="cycling-rx-banner glass" id="cyclingRecBanner" aria-live="polite" hidden></div>
     </div>
 
     <section class="metrics" aria-label="Live cycling metrics">
@@ -97,6 +101,16 @@
       </div>
     </section>
 
+    <section class="cycling-torque-bar glass" id="cyclingTorqueBar" aria-label="Cycling resistance torque control">
+      <button class="torque-step-btn" id="cyclingTorqueMinusBtn" type="button" aria-label="Decrease target resistance torque">−</button>
+      <div class="torque-bar-readout">
+        <span class="torque-bar-label">Target Resistance</span>
+        <strong id="cyclingTargetTorqueValue">14 Nm</strong>
+        <span class="torque-bar-status" id="cyclingCmdStatus">Demo mode · Ready for ESP</span>
+      </div>
+      <button class="torque-step-btn" id="cyclingTorquePlusBtn" type="button" aria-label="Increase target resistance torque">+</button>
+    </section>
+
     <nav class="scene-nav glass" aria-label="Scenery selection">
       <div class="nav-handle"></div>
       <button class="scene-option active" type="button" data-scene="forest" data-label="COASTAL FOREST" aria-pressed="true">
@@ -121,8 +135,10 @@
       <strong>Ride controls</strong>
       <button id="fullscreenButton" type="button">Enter fullscreen</button>
       <a class="menu-link" href="/progress">See Progress ↗</a>
+      <a class="menu-link" href="/intake">Clinical Intake</a>
       <button id="switchSessionButton" type="button">Switch session</button>
       <button id="backDashboardButton" type="button">Back to dashboard</button>
+      <p id="cyclingRxNote" hidden></p>
       <p id="espConnectionNote">Checking session mode…</p>
     </div>
 

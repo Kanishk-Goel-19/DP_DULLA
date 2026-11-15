@@ -7,9 +7,78 @@
 
 /* Dashboard matches the supplied responsive white/olive Figma screenshots. */
 .site-header{width:100%;height:88px;display:flex;align-items:center;justify-content:space-between;padding:0 max(3%,30px);background:#fff;position:relative;z-index:20}.site-logo{font-family:Arial,sans-serif;font-size:29px;font-weight:800;letter-spacing:-1.7px;color:#070707}.nav-list{display:flex;align-items:center;gap:30px;margin:0;padding:0;list-style:none}.nav-list a{font-size:13px;font-weight:700;white-space:nowrap}.nav-list a:hover,.nav-list .active{color:var(--green)}.logout-btn{background:var(--green);color:white;border:0;border-radius:999px;padding:16px 22px;font-weight:700;font-size:13px;white-space:nowrap}.logout-btn:hover{background:#34470a}.hamburger{display:none;background:transparent;border:0;font-size:27px;color:#111;line-height:1;padding:9px}.dashboard-main{max-width:1600px;margin:0 auto}.hero-title{text-align:center;margin:39px auto 42px;padding:0 20px;font-family:Georgia,'Times New Roman',serif;font-size:clamp(73px,10.2vw,148px);line-height:1.08;letter-spacing:-.06em;font-weight:400;color:#000;max-width:1450px}.hero-art{height:490px;position:relative;display:flex;align-items:flex-start;justify-content:center;margin:0 3.1%}.sage-band{position:absolute;bottom:0;left:0;right:0;height:69%;border-radius:34px;background:var(--sage)}.photo-frame{position:relative;z-index:1;width:min(72vw,860px);height:100%;border:15px solid #050505;border-bottom:0;border-radius:24px 24px 0 0;overflow:hidden;box-shadow:0 2px 9px #0004;background:#e7eff4}.photo-frame img{height:100%;width:100%;object-fit:cover;object-position:center center}.hero-bottom{margin:0 3.1%;border-top:1px solid #aaa;text-align:center;padding:75px 12px 100px}.micro-label{font-size:11px;letter-spacing:.02em;color:var(--green);font-family:monospace}.hero-bottom h2{font-family:Georgia,'Times New Roman',serif;font-size:clamp(40px,4.4vw,55px);font-weight:400;letter-spacing:-.04em;margin:24px auto 24px}.hero-bottom p{font-size:15px;color:#838383;margin:0 auto 38px}.connect-btn{min-width:142px;background:var(--pale);border:0;border-radius:999px;padding:15px 22px;font-size:13px;font-weight:700;color:#0a0c0a}.connect-btn:hover{background:#cddfad}.connect-status{max-width:480px;margin:20px auto 0!important;font-size:13px!important;line-height:1.5;color:#667846!important}.connect-status.error{color:#964b38!important}.menu-logout{display:none}
+.esp-url-row{max-width:460px;margin:0 auto 16px}.esp-url-input{width:100%;min-height:46px;padding:0 16px;border-radius:999px;border:1px solid #d5dfd0;background:#fff;font-size:13.5px;font-weight:600;color:var(--ink);text-align:center}.esp-url-input::placeholder{color:#8c998e;font-weight:500}
 
 /* Other pages are intentionally simple until the device's data format is available. */
 .inner-page{max-width:930px;margin:0 auto;padding:68px 24px 110px;min-height:calc(100svh - 90px)}.inner-eyebrow{font:13px monospace;color:var(--green);letter-spacing:1px}.inner-title{font-family:Georgia,'Times New Roman',serif;letter-spacing:-.055em;line-height:1.08;font-weight:400;font-size:clamp(50px,7.5vw,92px);margin:15px 0 20px}.inner-description{font-size:16px;color:#757d76;line-height:1.75;max-width:690px}.surface-panel{background:#f7f9f5;border:1px solid #dfe8d8;border-radius:22px;padding:27px;margin:36px 0}.surface-panel h2{font-family:Georgia,serif;font-size:30px;font-weight:400;margin:0 0 12px}.surface-panel p{margin:0;color:#6d7c70;line-height:1.6}.inline-link{display:inline-block;margin-top:24px;color:var(--green);text-decoration:underline;font-size:14px;font-weight:700}.pill-status{display:inline-flex;gap:8px;align-items:center;padding:11px 18px;border-radius:99px;background:#e6f1d6;color:var(--green);font-size:13px;font-weight:700}.simple-list{padding-left:20px;color:#667667;line-height:1.9}.simple-table{width:100%;border-collapse:collapse}.simple-table td,.simple-table th{padding:13px 6px;border-bottom:1px solid #dbe3d6;text-align:left;font-size:14px}
 
 @media(max-width:960px){.hero-title{font-size:clamp(70px,10.3vw,108px);max-width:750px;line-height:.99;margin:40px auto 65px}.hero-art{height:422px;margin:0 5%}.photo-frame{width:88%;border-width:13px}.hero-bottom{margin:0 5%}.site-header{padding:0 5%}.nav-list{gap:20px}}
 @media(max-width:620px){.site-header{height:79px;border-radius:0 0 20px 20px;box-shadow:0 2px 5px #0000000d;padding:0 20px}.site-logo{font-size:28px;font-weight:500;letter-spacing:-1.5px}.hamburger{display:block}.top-logout,.desktop-nav{display:none}.nav-list.mobile-nav{display:flex;flex-direction:column;gap:0;position:absolute;top:79px;left:0;right:0;padding:10px 22px 18px;background:white;box-shadow:0 12px 14px #00000012;align-items:stretch}.mobile-nav li a,.menu-logout{display:block;padding:14px 6px;border:0;background:transparent;text-align:left;font-size:15px;font-weight:600}.menu-logout{color:var(--green)}.hero-title{max-width:350px;margin:39px auto 73px;padding:0 10px;font-size:clamp(68px,20vw,80px);letter-spacing:-.065em;line-height:.90;overflow-wrap:anywhere}.hero-art{margin:0 4.3%;height:414px;align-items:flex-end}.sage-band{height:88%;border-radius:28px}.photo-frame{height:100%;width:78%;border:10px solid #090909;border-bottom:0;border-radius:36px 36px 0 0}.photo-frame img{object-fit:cover;object-position:52% center}.hero-bottom{margin:0 4.3%;padding:80px 4px 98px}.hero-bottom h2{font-size:44px;margin:24px auto 28px}.hero-bottom p{font-size:14px;line-height:1.6;margin-bottom:31px}.connect-btn{padding:16px 23px}.inner-page{padding-top:45px}.auth-page{padding:9px}.auth-card{min-height:calc(100svh - 18px);border-radius:23px;padding:24px}.auth-body{padding-top:49px}.auth-title{font-size:39px}.auth-subtitle{margin-bottom:26px}}
+
+/* Clinical Intake Questionnaire & Dashboard Recommendation Card */
+.intake-page { max-width: 960px; }
+.intake-form { display: grid; gap: 22px; margin-top: 26px; }
+.intake-card { margin: 0; padding: 26px; background: #f7f9f5; border: 1px solid #dfe8d8; border-radius: 22px; }
+.intake-step-eyebrow { font-family: monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--green); font-weight: 700; margin-bottom: 8px; }
+.intake-card h2 { font-family: Georgia, 'Times New Roman', serif; font-size: clamp(22px, 3vw, 28px); font-weight: 400; margin: 0 0 16px; color: var(--ink); }
+.choice-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.choice-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.choice-chip-btn { text-align: left; border: 1.5px solid #dbe4d2; background: #fff; color: var(--ink); border-radius: 14px; padding: 13px 14px; font-size: 13.5px; font-weight: 600; transition: border-color .16s, background-color .16s, transform .12s; }
+.choice-chip-btn:hover { border-color: var(--sage); }
+.choice-chip-btn.selected { background: #e7f1da; border-color: var(--green); color: #1d3206; box-shadow: 0 6px 16px rgba(71, 94, 13, .1); }
+.intake-two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.intake-four-col { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.intake-field label { display: block; font-size: 13px; font-weight: 700; color: var(--ink); margin-bottom: 8px; }
+.intake-number { width: 100%; min-height: 46px; padding: 0 14px; border-radius: 12px; border: 1px solid #d5dfd0; background: #fff; font-size: 15px; font-weight: 600; color: var(--ink); }
+.intake-slider-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; }
+.intake-slider-val { font-family: monospace; font-size: 13px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: #e7f1da; color: var(--green); }
+.intake-slider-val.warn { background: #fff0c3; color: #72581b; }
+.intake-slider-val.alert { background: #ffe9e0; color: #9e3622; }
+.intake-range { width: 100%; accent-color: var(--green); cursor: pointer; height: 24px; }
+.preset-pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.preset-mini-btn { border: 1px solid #d6e0cf; background: #fff; color: var(--ink); border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 600; }
+.preset-mini-btn.selected { background: var(--green); border-color: var(--green); color: #fff; }
+.intake-submit-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; margin-top: 6px; }
+.intake-submit-btn { min-width: 240px; min-height: 52px; border: 0; border-radius: 999px; padding: 14px 26px; background: var(--green); color: #fff; font-size: 14px; font-weight: 700; }
+.intake-submit-btn:hover:not(:disabled) { background: #34470a; }
+.clinical-result-card { margin: 28px 0 0; background: #fff; border: 2px solid var(--green); border-radius: 24px; padding: 28px; box-shadow: 0 20px 50px rgba(23, 45, 36, .08); }
+.clinical-phase-pill { display: inline-flex; padding: 7px 14px; border-radius: 999px; background: #e7f1da; color: var(--green); font-size: 12px; font-weight: 700; }
+.clinical-result-card h2 { font-family: Georgia, 'Times New Roman', serif; font-size: clamp(26px, 4vw, 34px); font-weight: 400; margin: 14px 0 10px; line-height: 1.15; }
+.clinical-summary-text { margin: 0 0 18px; color: #5f6c61; font-size: 14.5px; line-height: 1.65; }
+.clinical-locks { display: grid; gap: 8px; margin-bottom: 20px; }
+.clinical-lock-pill { padding: 10px 14px; border-radius: 12px; background: #eef5e8; border: 1px solid #d4e3c5; color: #2f4308; font-size: 13px; font-weight: 600; }
+.clinical-lock-pill.caution { background: #fff4df; border-color: #eed6a4; color: #72581b; }
+.clinical-regime-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 22px; }
+.regime-box { background: #f7f9f5; border: 1px solid #dfe8d8; border-radius: 18px; padding: 18px; }
+.regime-box.recommended { background: #f1f6e9; border-color: var(--green); }
+.regime-box-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.regime-box-head strong { font-size: 15px; color: var(--ink); }
+.regime-badge { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--green); color: #fff; }
+.regime-badge.locked { background: #ffe9e0; color: #9e3622; }
+.regime-list { margin: 0; padding-left: 18px; font-size: 13.5px; line-height: 1.65; color: #4d5a50; }
+.gate-trace { margin: 0 0 20px; padding: 14px 16px; border-radius: 14px; background: #f9fbf8; border: 1px solid #e3e8df; font-size: 12.5px; color: #5b695e; line-height: 1.6; }
+.gate-trace strong { display: block; color: var(--ink); margin-bottom: 4px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+.clinical-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.dashboard-clinical-box { max-width: 780px; margin: 0 auto 32px; text-align: left; background: #f7f9f5; border: 1px solid #dce6d2; border-radius: 22px; padding: 22px 24px; }
+.dashboard-clinical-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.dashboard-clinical-box h3 { font-family: Georgia, 'Times New Roman', serif; font-weight: 400; font-size: 24px; margin: 6px 0 8px; color: var(--ink); }
+.dashboard-clinical-box p { margin: 0 0 12px; font-size: 14px; color: #617063; line-height: 1.55; }
+.dashboard-clinical-pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.dashboard-clinical-pill { background: #e7f1da; color: #2b4208; border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 700; }
+.dashboard-clinical-pill.warn { background: #fff0c3; color: #72581b; }
+
+@media (max-width: 760px) {
+  .choice-grid, .choice-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .intake-two-col, .clinical-regime-grid { grid-template-columns: 1fr; }
+  .intake-four-col { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 520px) {
+  .choice-grid { grid-template-columns: 1fr; }
+  .choice-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .intake-card, .clinical-result-card, .dashboard-clinical-box { padding: 18px 16px; border-radius: 18px; }
+  .intake-submit-btn { width: 100%; }
+  .clinical-actions { flex-direction: column; }
+  .clinical-actions > * { width: 100%; text-align: center; justify-content: center; display: inline-flex; align-items: center; }
+  .progress-page .simple-table td, .progress-page .simple-table th { padding: 11px 8px; font-size: 13px; }
+}

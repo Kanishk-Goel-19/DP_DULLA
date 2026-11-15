@@ -3,7 +3,9 @@ import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AuthStore } from './backend/core.mjs'
+import { computeClinicalPrescription } from './backend/clinical.mjs'
 import { sendVerificationEmail } from './backend/email.mjs'
+import { attachWsBridge, isAllowedLanWsUrl, normalizeEspWsUrl } from './backend/wsBridge.mjs'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
 // Load optional .env without another package.
@@ -109,6 +111,7 @@ export async function createAppServer(options = {}) {
   await store.init()
 
   // Tracks each login session's connection mode ('demo' or 'connected') for /device/* routes.
+  let runtimeWsUrl = config.ws
   const sessionModes = new Map()
   const resolveDeviceMode = token => {
     if (!token) return 'none'
@@ -118,7 +121,8 @@ export async function createAppServer(options = {}) {
   }
 
   const appServer = http.createServer(async (req, res) => {
-    const pathname = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`).pathname
+    const reqUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
+    const pathname = reqUrl.pathname
     try {
       const token = parseCookies(req).doula_session
       const user = store.getSession(token)
@@ -130,6 +134,7 @@ export async function createAppServer(options = {}) {
             ok: true,
             user,
             connectionMode: user ? resolveDeviceMode(token) : 'none',
+            espUrl: runtimeWsUrl,
           })
         }
         if (method === 'POST' && pathname === '/api/auth/start') {
@@ -182,21 +187,83 @@ export async function createAppServer(options = {}) {
         }
         if (method === 'GET' && pathname === '/api/device/status') {
           if (!user) return json(res, 401, { ok: false, message: 'Please log in.' })
-          if (config.bypassEsp) {
+          if (config.bypassEsp && !reqUrl.searchParams.get('ws')) {
             sessionModes.set(token, 'connected')
-            return json(res, 200, { ok: true, connected: true, bypassed: true, message: 'ESP32 check bypassed for testing.' })
+            return json(res, 200, { ok: true, connected: true, bypassed: true, wsUrl: runtimeWsUrl, message: 'ESP32 check bypassed for testing.' })
           }
-          const result = await espChecker(config.ws)
-          if (result.connected) sessionModes.set(token, 'connected')
-          return json(res, 200, { ok: true, bypassed: false, ...result })
+          const rawOverride = reqUrl.searchParams.get('ws')
+          let targetUrl = runtimeWsUrl
+          if (rawOverride) {
+            targetUrl = normalizeEspWsUrl(rawOverride)
+            if (!isAllowedLanWsUrl(targetUrl)) {
+              return json(res, 400, { ok: false, connected: false, message: 'ESP32 URL must point to a local/LAN IP (192.168.x.x, 10.x.x.x, .local, or localhost).' })
+            }
+          }
+          const result = await espChecker(targetUrl)
+          if (result.connected) {
+            if (targetUrl !== runtimeWsUrl) {
+              runtimeWsUrl = targetUrl
+              wsBridge.resetUpstream()
+            }
+            sessionModes.set(token, 'connected')
+          }
+          return json(res, 200, { ok: true, bypassed: false, wsUrl: targetUrl, ...result })
+        }
+        if (method === 'POST' && pathname === '/api/device/connect') {
+          if (!user) return json(res, 401, { ok: false, message: 'Please log in.' })
+          const body = await readBody(req)
+          const rawInput = body?.wsUrl ? String(body.wsUrl).trim() : ''
+          if (config.bypassEsp && !rawInput) {
+            sessionModes.set(token, 'connected')
+            return json(res, 200, { ok: true, connected: true, bypassed: true, wsUrl: runtimeWsUrl, message: 'ESP32 check bypassed for testing.' })
+          }
+          const targetUrl = rawInput ? normalizeEspWsUrl(rawInput) : runtimeWsUrl
+          if (rawInput && !isAllowedLanWsUrl(targetUrl)) {
+            return json(res, 400, { ok: false, connected: false, message: 'ESP32 URL must point to a local/LAN IP (192.168.x.x, 10.x.x.x, .local, or localhost).' })
+          }
+          const result = await espChecker(targetUrl)
+          if (result.connected) {
+            if (targetUrl !== runtimeWsUrl) {
+              runtimeWsUrl = targetUrl
+              wsBridge.resetUpstream()
+            }
+            sessionModes.set(token, 'connected')
+          }
+          return json(res, 200, { ok: true, bypassed: false, wsUrl: targetUrl, ...result })
         }
         if (method === 'GET' && pathname === '/api/device/config') {
           if (!user) return json(res, 401, { ok: false, message: 'Please log in.' })
           return json(res, 200, {
             ok: true,
             bypassEsp: config.bypassEsp,
-            wsUrl: config.ws,
+            wsUrl: runtimeWsUrl,
+            bridgeWsPath: '/ws/device',
             deviceMode: resolveDeviceMode(token),
+            clinicalIntake: user.clinicalIntake || null,
+            prescription: user.prescription || null,
+          })
+        }
+        if (method === 'POST' && pathname === '/api/clinical/preview') {
+          if (!user) return json(res, 401, { ok: false, message: 'Please log in.' })
+          const prescription = computeClinicalPrescription(await readBody(req))
+          return json(res, 200, { ok: true, prescription })
+        }
+        if (method === 'POST' && pathname === '/api/clinical/intake') {
+          if (!user) return json(res, 401, { ok: false, message: 'Please log in.' })
+          const updatedUser = await store.setClinicalIntake(user.id, await readBody(req))
+          return json(res, 200, {
+            ok: true,
+            user: updatedUser,
+            clinicalIntake: updatedUser.clinicalIntake,
+            prescription: updatedUser.prescription,
+          })
+        }
+        if (method === 'GET' && pathname === '/api/clinical/prescription') {
+          if (!user) return json(res, 401, { ok: false, message: 'Please log in.' })
+          return json(res, 200, {
+            ok: true,
+            clinicalIntake: user.clinicalIntake || null,
+            prescription: user.prescription || null,
           })
         }
         if (method === 'GET' && pathname === '/api/progress') {
@@ -205,7 +272,9 @@ export async function createAppServer(options = {}) {
         }
         if (method === 'POST' && pathname === '/api/progress') {
           if (!user) return json(res, 401, { ok: false, message: 'Please log in.' })
-          const saved = await store.addProgress(user.id, await readBody(req))
+          const body = await readBody(req)
+          const verifiedByDevice = Boolean(body?.source === 'esp32' && wsBridge.hasRecentTelemetry(user.id, 120_000))
+          const saved = await store.addProgress(user.id, { ...body, verifiedByDevice })
           return json(res, 201, { ok: true, session: saved })
         }
         return json(res, 404, { ok: false, message: 'API route not found.' })
@@ -265,7 +334,13 @@ export async function createAppServer(options = {}) {
     }
   })
 
-  return { server: appServer, config, store }
+  const wsBridge = attachWsBridge(appServer, {
+    store,
+    resolveDeviceMode,
+    getTargetWsUrl: () => runtimeWsUrl,
+  })
+
+  return { server: appServer, config, store, wsBridge }
 }
 
 const isMain = Boolean(process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))

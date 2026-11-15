@@ -80,12 +80,17 @@ const state = {
   deviceMode: 'demo',
   bypassEsp: false,
   wsUrl: '',
+  bridgeWsPath: '',
   wsConnected: false,
+  hadLiveEsp: false,
   demoRunning: true,
   startedAt: 0,
   pausedAt: 0,
   pausedMs: 0,
   sessions: [],
+  prescription: null,
+  clinicalIntake: null,
+  userEditedSetup: false,
 }
 
 let socket = null
@@ -119,6 +124,120 @@ function activeModeConfig() {
   return MODES[state.mode]
 }
 
+function recommendedConfigForMode(modeId) {
+  const cfg = MODES[modeId] || MODES.isotonic
+  const flx = state.prescription?.flexion
+  if (flx && flx.modeId === cfg.id) {
+    return {
+      isClinicalRec: true,
+      sourceLabel: `Clinical Decision Tree (${state.prescription.protocolId})`,
+      suggestedReps: clamp(Number(flx.suggestedReps) || cfg.suggestedReps, MIN_REPS, MAX_REPS),
+      targetTorque: clamp(Number(flx.targetTorqueNm) || cfg.defaultTorque, cfg.minTorque, cfg.maxTorque),
+      torqueRangeNm: flx.torqueRangeNm || `${cfg.minTorque}–${cfg.maxTorque} Nm`,
+      romText: Array.isArray(flx.romWindowDeg) ? `${flx.romWindowDeg[0]}°–${flx.romWindowDeg[1]}°` : '',
+      speedSpec: flx.speedSpec || '',
+      safetyTaper: flx.safetyTaper || '',
+    }
+  }
+  return {
+    isClinicalRec: false,
+    sourceLabel: 'Therapist suggested',
+    suggestedReps: cfg.suggestedReps,
+    targetTorque: cfg.defaultTorque,
+    torqueRangeNm: `${cfg.minTorque}–${cfg.maxTorque} N·m`,
+    romText: '',
+    speedSpec: '',
+    safetyTaper: '',
+  }
+}
+
+function renderClinicalFlexionCard() {
+  const card = $('clinicalFlexionCard')
+  if (!card) return
+  const rx = state.prescription
+
+  document.querySelectorAll('[data-rec-badge]').forEach((badge) => {
+    badge.hidden = !rx || badge.dataset.recBadge !== rx.flexion?.modeId
+  })
+
+  document.querySelectorAll('[data-mode-meta]').forEach((meta) => {
+    const modeId = meta.dataset.modeMeta
+    const rec = recommendedConfigForMode(modeId)
+    const cfg = MODES[modeId]
+    if (!cfg) return
+    const verb = cfg.role === 'support' ? 'Support' : 'Resistance'
+    meta.textContent = rec.isClinicalRec
+      ? `Recommended: ${rec.suggestedReps} reps · ${rec.targetTorque} N·m (${rec.torqueRangeNm})`
+      : `Default: ${cfg.suggestedReps} reps · ${verb} ${cfg.minTorque}–${cfg.maxTorque} N·m`
+  })
+
+  if (!rx) {
+    card.hidden = false
+    card.innerHTML = `
+      <div class="clinical-flexion-head">
+        <div>
+          <span class="clinical-flexion-eyebrow">Clinical Decision Tree · U1: ESP_MASTER</span>
+          <h2 class="clinical-flexion-title">Personalize your Flexion &amp; Extension settings</h2>
+        </div>
+        <div class="clinical-flexion-actions">
+          <a class="mini-pill-btn" href="/intake">Complete Clinical Intake →</a>
+        </div>
+      </div>
+      <p class="clinical-flexion-summary">Complete your Clinical Intake Questionnaire once to receive automatic mode, rep count, ROM window, and torque target recommendations here.</p>
+    `
+    return
+  }
+
+  const flx = rx.flexion
+  const lockChips = (rx.safetyLocks || [])
+    .map((lock) => `<span class="clinical-flexion-chip ${/Locked|Contraindicated|Precaution/i.test(lock) ? 'is-lock' : ''}">${escapeHtml(lock)}</span>`)
+    .join('')
+  const romChip = Array.isArray(flx.romWindowDeg)
+    ? `<span class="clinical-flexion-chip">ROM ${escapeHtml(flx.romWindowDeg[0])}°–${escapeHtml(flx.romWindowDeg[1])}°</span>`
+    : ''
+  const holdChip = flx.pauseHoldSec
+    ? `<span class="clinical-flexion-chip">${escapeHtml(flx.pauseHoldSec)}s isometric hold · ${escapeHtml(flx.speedSpec)}</span>`
+    : `<span class="clinical-flexion-chip">${escapeHtml(flx.speedSpec)}</span>`
+
+  card.hidden = false
+  card.innerHTML = `
+    <div class="clinical-flexion-head">
+      <div>
+        <span class="clinical-flexion-eyebrow">Clinical Decision Tree · ${escapeHtml(rx.phase)}</span>
+        <h2 class="clinical-flexion-title">${escapeHtml(rx.protocolId)}: ${escapeHtml(rx.headline)}</h2>
+      </div>
+      <div class="clinical-flexion-actions">
+        <button class="use-suggested-btn" id="applyRecBtn" type="button">Apply Recommended Settings</button>
+        <a class="mini-pill-btn" href="/intake">Update Intake →</a>
+      </div>
+    </div>
+    <p class="clinical-flexion-summary">${escapeHtml(rx.summary)}${flx.safetyTaper ? ` Safety rule: ${escapeHtml(flx.safetyTaper)}.` : ''}</p>
+    <div class="clinical-flexion-chips">
+      <span class="clinical-flexion-chip">Recommended Mode: ${escapeHtml(flx.modeName)}</span>
+      <span class="clinical-flexion-chip">Target Torque: ${escapeHtml(flx.targetTorqueNm)} N·m (${escapeHtml(flx.torqueRangeNm)})</span>
+      <span class="clinical-flexion-chip">Suggested Reps: ${escapeHtml(flx.suggestedReps)} reps</span>
+      ${romChip}
+      ${holdChip}
+      ${lockChips}
+    </div>
+  `
+
+  $('applyRecBtn')?.addEventListener('click', () => {
+    applyClinicalPrescription(rx, { force: true })
+  })
+}
+
+function applyClinicalPrescription(rx, { force = false } = {}) {
+  if (!rx?.flexion || !MODES[rx.flexion.modeId]) return
+  if (!force && state.userEditedSetup) return
+  const recCfg = MODES[rx.flexion.modeId]
+  state.mode = recCfg.id
+  state.targetReps = clamp(Number(rx.flexion.suggestedReps) || recCfg.suggestedReps, MIN_REPS, MAX_REPS)
+  state.targetTorque = clamp(Number(rx.flexion.targetTorqueNm) || recCfg.defaultTorque, recCfg.minTorque, recCfg.maxTorque)
+  state.userEditedSetup = false
+  updateSetupUI()
+}
+
 function formatDate(value) {
   if (!value) return ''
   const date = new Date(value)
@@ -137,11 +256,14 @@ function renderHistory() {
   list.innerHTML = state.sessions.slice(0, 6).map((row) => {
     const modeDetail = row.mode && row.mode !== row.type ? ` · ${escapeHtml(row.mode)}` : ''
     const torqueDetail = Number.isFinite(Number(row.torqueNm)) ? ` · ${Number(row.torqueNm)} N·m` : ''
+    const sourceLabel = row.source === 'esp32'
+      ? (row.verifiedByDevice ? 'ESP32 Verified' : 'ESP32 Live')
+      : (row.source === 'demo' ? 'Demo' : 'Connected preview')
     return `<article class="exercise-history-row">
       <div class="exercise-history-icon">${row.type === 'Cycling' ? cycleIcon : boltIcon}</div>
       <div class="exercise-history-info">
         <strong>${escapeHtml(row.type)}${modeDetail}</strong>
-        <small>${formatDate(row.date)}${torqueDetail} · ${row.source === 'demo' ? 'Demo' : 'Connected preview'}</small>
+        <small>${formatDate(row.date)}${torqueDetail} · ${sourceLabel}</small>
       </div>
       <div class="exercise-history-count">
         <strong>${Number(row.reps)}</strong>
@@ -165,6 +287,7 @@ async function loadHistory() {
 
 function updateSetupUI() {
   const modeCfg = activeModeConfig()
+  const rec = recommendedConfigForMode(modeCfg.id)
 
   document.querySelectorAll('.mode-card').forEach((card) => {
     const selected = card.dataset.mode === state.mode
@@ -172,29 +295,33 @@ function updateSetupUI() {
     card.setAttribute('aria-checked', String(selected))
   })
 
+  if ($('suggestionSourceLabel')) $('suggestionSourceLabel').textContent = rec.sourceLabel
   $('suggestedModeName').textContent = modeCfg.shortName
-  $('suggestedRepCount').textContent = `${modeCfg.suggestedReps} reps`
+  $('suggestedRepCount').textContent = `${rec.suggestedReps} reps`
   $('repTargetDisplay').textContent = String(state.targetReps)
   $('repMinusBtn').disabled = state.targetReps <= MIN_REPS
   $('repPlusBtn').disabled = state.targetReps >= MAX_REPS
 
+  const presets = Array.from(new Set([...PRESET_REPS, rec.suggestedReps])).sort((a, b) => a - b)
   const presetRoot = $('repPresets')
   presetRoot.innerHTML = ''
-  for (const count of PRESET_REPS) {
+  for (const count of presets) {
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.className = 'rep-preset-btn'
     if (count === state.targetReps) btn.classList.add('active')
-    if (count === modeCfg.suggestedReps) btn.classList.add('is-suggested')
+    if (count === rec.suggestedReps) btn.classList.add('is-suggested')
     btn.textContent = `${count}`
     btn.addEventListener('click', () => {
+      state.userEditedSetup = true
       state.targetReps = count
       updateSetupUI()
     })
     presetRoot.appendChild(btn)
   }
 
-  $('setupSummary').innerHTML = `<strong>${modeCfg.name}</strong> · ${state.targetReps} reps · Initial ${modeCfg.roleLabel.toLowerCase()}: <strong>${state.targetTorque} N·m</strong>`
+  const romSuffix = rec.romText ? ` · ROM ${escapeHtml(rec.romText)}` : ''
+  $('setupSummary').innerHTML = `<strong>${escapeHtml(modeCfg.name)}</strong> · ${state.targetReps} reps · Initial ${escapeHtml(modeCfg.roleLabel.toLowerCase())}: <strong>${state.targetTorque} N·m</strong>${romSuffix}`
 }
 
 function paintTorqueOdometer(torqueNm) {
@@ -298,7 +425,7 @@ function updateEspStatusPill() {
     pill.textContent = '● Live ESP32 Telemetry'
     sourceTag.textContent = 'From ESP WebSocket'
     testControls.hidden = true
-  } else if (state.deviceMode === 'demo' || state.bypassEsp || !state.wsUrl) {
+  } else if (state.deviceMode === 'demo' || !state.wsUrl) {
     pill.textContent = state.deviceMode === 'connected' ? '● Connected Preview' : '● Demo Simulation'
     pill.classList.add('warn')
     sourceTag.textContent = state.demoRunning ? 'Simulated ESP Stream' : 'Demo Paused'
@@ -309,6 +436,34 @@ function updateEspStatusPill() {
     sourceTag.textContent = 'Awaiting ESP Packets'
     testControls.hidden = false
   }
+}
+
+function buildStartSessionPayload() {
+  const modeCfg = activeModeConfig()
+  const rx = state.prescription
+  const intake = state.clinicalIntake
+  return {
+    type: 'start_session',
+    mode: modeCfg.id,
+    op_mode: modeCfg.opMode,
+    role: modeCfg.role,
+    target_reps: state.targetReps,
+    torque_nm: state.targetTorque,
+    target_torque_ext: state.targetTorque,
+    rom_min_deg: rx?.flexion?.romWindowDeg?.[0] ?? intake?.romExt ?? 0,
+    rom_max_deg: rx?.flexion?.romWindowDeg?.[1] ?? intake?.romFlex ?? 110,
+    pathology: intake?.pathology ?? null,
+    d_offset_m: Number(((intake?.dOffsetCm ?? 9.0) / 100).toFixed(3)),
+    L_leg_m: Number(((intake?.lLegCm ?? 30.0) / 100).toFixed(3)),
+  }
+}
+
+function resolveEspSocketEndpoint() {
+  if (state.bridgeWsPath) {
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    return { endpoint: `${proto}://${window.location.host}${state.bridgeWsPath}`, usingBridge: true }
+  }
+  return { endpoint: state.wsUrl, usingBridge: false }
 }
 
 function sendEspCommand(payload) {
@@ -408,30 +563,75 @@ function closeEspSocket() {
 
 function connectEspSocket() {
   closeEspSocket()
-  if (!state.wsUrl || !/^wss?:\/\//.test(state.wsUrl)) {
+  if (state.deviceMode !== 'connected' || !state.wsUrl) {
+    updateEspStatusPill()
+    startDemoTelemetry()
+    return
+  }
+
+  const { endpoint, usingBridge } = resolveEspSocketEndpoint()
+  if (!endpoint || !/^wss?:\/\//.test(endpoint)) {
     updateEspStatusPill()
     startDemoTelemetry()
     return
   }
 
   try {
-    socket = new WebSocket(state.wsUrl)
+    socket = new WebSocket(endpoint)
     socket.addEventListener('open', () => {
-      state.wsConnected = true
-      stopDemoTelemetry()
-      updateEspStatusPill()
-      const modeCfg = activeModeConfig()
-      sendEspCommand({
-        type: 'start_session',
-        mode: modeCfg.id,
-        op_mode: modeCfg.opMode,
-        target_reps: state.targetReps,
-        torque_nm: state.targetTorque,
-      })
+      if (!usingBridge) {
+        state.wsConnected = true
+        stopDemoTelemetry()
+        updateEspStatusPill()
+        sendEspCommand(buildStartSessionPayload())
+      } else {
+        updateEspStatusPill()
+        if (state.active && state.demoRunning && !state.ended && !state.wsConnected) {
+          startDemoTelemetry()
+        }
+      }
     })
     socket.addEventListener('message', (event) => {
       try {
-        updateFromESP(JSON.parse(event.data))
+        const packet = JSON.parse(event.data)
+        if (!packet || typeof packet !== 'object') return
+
+        if (packet.type === 'esp_status') {
+          const connected = Boolean(packet.connected)
+          state.wsConnected = connected
+          if (connected) {
+            stopDemoTelemetry()
+            if (state.active && !state.ended) {
+              sendEspCommand(buildStartSessionPayload())
+              if (state.paused) sendEspCommand({ type: 'pause_session' })
+            }
+            if ($('espCommandStatus')) {
+              $('espCommandStatus').textContent = `ESP32 live · Target ${state.targetTorque} N·m`
+            }
+          } else {
+            if (state.active && state.demoRunning && !state.ended) startDemoTelemetry()
+            if ($('espCommandStatus') && packet.message) {
+              $('espCommandStatus').textContent = packet.message
+            }
+          }
+          updateEspStatusPill()
+          return
+        }
+
+        if (packet.type === 'esp_ack') {
+          if (packet.forwarded === false && $('espCommandStatus')) {
+            $('espCommandStatus').textContent = packet.message || 'ESP32 offline — command queued locally'
+          }
+          return
+        }
+
+        state.hadLiveEsp = true
+        if (!state.wsConnected) {
+          state.wsConnected = true
+          stopDemoTelemetry()
+          updateEspStatusPill()
+        }
+        updateFromESP(packet)
       } catch (err) {
         console.warn('Invalid ESP32 JSON packet', err)
       }
@@ -480,7 +680,9 @@ async function saveSessionProgress(repsOverride) {
         torqueNm: state.targetTorque,
         reps,
         durationSeconds,
-        source: state.deviceMode === 'demo' ? 'demo' : 'connected-preview',
+        source: (state.wsConnected || state.hadLiveEsp)
+          ? 'esp32'
+          : (state.deviceMode === 'demo' ? 'demo' : 'connected-preview'),
       }),
     })
     const data = await res.json()
@@ -510,6 +712,7 @@ function enterActiveSession() {
   state.completedReps = 0
   state.paused = false
   state.estopped = false
+  state.hadLiveEsp = false
   state.startedAt = Date.now()
   state.pausedAt = 0
   state.pausedMs = 0
@@ -521,13 +724,24 @@ function enterActiveSession() {
   $('activeView').hidden = false
   $('saveFeedback').hidden = true
 
+  const rec = recommendedConfigForMode(modeCfg.id)
   $('activeModePill').textContent = modeCfg.name
-  $('activeSuggestedTag').textContent = `Therapist suggested: ${modeCfg.suggestedReps} reps`
+  $('activeSuggestedTag').textContent = `${rec.isClinicalRec ? 'Clinically suggested' : 'Therapist suggested'}: ${rec.suggestedReps} reps`
   $('torqueRoleEyebrow').textContent = modeCfg.eyebrow
   $('torqueOdometerLabel').textContent = modeCfg.roleLabel
   $('setpointLabel').textContent = modeCfg.setpointLabel
   $('odoMaxLabel').textContent = String(modeCfg.maxTorque)
   $('odoProgress').classList.toggle('support-arc', modeCfg.role === 'support')
+  const torqueRecEl = $('activeTorqueRec')
+  if (torqueRecEl) {
+    if (state.prescription?.flexion) {
+      const flx = state.prescription.flexion
+      torqueRecEl.hidden = false
+      torqueRecEl.textContent = `Clinical target (${state.prescription.protocolId}): ${flx.targetTorqueNm} N·m (${flx.torqueRangeNm}) · ROM ${flx.romWindowDeg[0]}°–${flx.romWindowDeg[1]}°`
+    } else {
+      torqueRecEl.hidden = true
+    }
+  }
   $('pauseSessionBtn').textContent = 'Pause Session'
   $('pauseSessionBtn').disabled = false
   $('endSessionBtn').disabled = false
@@ -537,13 +751,7 @@ function enterActiveSession() {
   updateCountdownUI()
   updateTorqueControlsUI()
 
-  const { sentLive } = sendEspCommand({
-    type: 'start_session',
-    mode: modeCfg.id,
-    op_mode: modeCfg.opMode,
-    target_reps: state.targetReps,
-    torque_nm: state.targetTorque,
-  })
+  const { sentLive } = sendEspCommand(buildStartSessionPayload())
   $('espCommandStatus').textContent = sentLive
     ? `Session started on ESP · Target: ${state.targetTorque} N·m`
     : `Initial target ${state.targetTorque} N·m — adjust with − / + to send to ESP`
@@ -609,24 +817,30 @@ function attachEvents() {
     card.addEventListener('click', () => {
       const modeId = card.dataset.mode
       if (!MODES[modeId]) return
+      const rec = recommendedConfigForMode(modeId)
+      state.userEditedSetup = true
       state.mode = modeId
-      state.targetReps = MODES[modeId].suggestedReps
-      state.targetTorque = MODES[modeId].defaultTorque
+      state.targetReps = rec.suggestedReps
+      state.targetTorque = rec.targetTorque
       updateSetupUI()
     })
   })
 
   $('useSuggestedBtn').addEventListener('click', () => {
-    state.targetReps = activeModeConfig().suggestedReps
+    const rec = recommendedConfigForMode(state.mode)
+    state.targetReps = rec.suggestedReps
+    state.targetTorque = rec.targetTorque
     updateSetupUI()
   })
 
   $('repMinusBtn').addEventListener('click', () => {
+    state.userEditedSetup = true
     state.targetReps = clamp(state.targetReps - 1, MIN_REPS, MAX_REPS)
     updateSetupUI()
   })
 
   $('repPlusBtn').addEventListener('click', () => {
+    state.userEditedSetup = true
     state.targetReps = clamp(state.targetReps + 1, MIN_REPS, MAX_REPS)
     updateSetupUI()
   })
@@ -644,6 +858,7 @@ function attachEvents() {
     state.completedReps = 0
     state.paused = false
     state.estopped = false
+    state.hadLiveEsp = false
     state.startedAt = Date.now()
     state.pausedAt = 0
     state.pausedMs = 0
@@ -654,6 +869,10 @@ function attachEvents() {
     $('saveFeedback').hidden = true
     updateCountdownUI()
     updateEspStatusPill()
+    const { sentLive } = sendEspCommand(buildStartSessionPayload())
+    $('espCommandStatus').textContent = sentLive
+      ? `Restarted on ESP · Target: ${state.targetTorque} N·m`
+      : `Target ${state.targetTorque} N·m — adjust with − / + to send to ESP`
     if (!state.wsConnected && state.demoRunning) startDemoTelemetry()
   })
 
@@ -692,13 +911,23 @@ function attachEvents() {
 
 async function loadDeviceConfig() {
   try {
-    const res = await fetch('/api/device/config', { credentials: 'same-origin' })
+    const res = await fetch('/api/device/config', {
+      credentials: 'same-origin',
+      cache: 'no-store',
+    })
     if (!res.ok) return
     const data = await res.json()
     if (data.ok) {
       state.bypassEsp = Boolean(data.bypassEsp)
       state.deviceMode = data.deviceMode === 'connected' ? 'connected' : 'demo'
       state.wsUrl = data.wsUrl || ''
+      state.bridgeWsPath = data.bridgeWsPath || ''
+      state.prescription = data.prescription || null
+      state.clinicalIntake = data.clinicalIntake || null
+      renderClinicalFlexionCard()
+      if (state.prescription && !state.active) {
+        applyClinicalPrescription(state.prescription, { force: false })
+      }
       updateEspStatusPill()
     }
   } catch {}

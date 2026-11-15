@@ -23,6 +23,7 @@
       <button class="hamburger" id="menuToggleBtn" type="button" aria-label="Toggle menu" aria-expanded="false">☰</button>
       <nav class="mobile-nav-drawer" id="mobileNavDrawer" aria-label="Mobile session navigation">
         <a href="/dashboard">Dashboard</a>
+        <a href="/intake">Clinical Intake</a>
         <a href="/device/">Switch Session</a>
         <a href="/device/cycling/">Cycling Session</a>
         <a href="/progress">See Progress ↗</a>
@@ -45,12 +46,15 @@
         <h1 class="inner-title">Flexion &amp; Extension</h1>
         <p class="inner-description">Select your training mode and set your target repetitions before beginning.</p>
 
+        <section class="clinical-flexion-card" id="clinicalFlexionCard" aria-live="polite" hidden></section>
+
         <div class="section-label">1. Choose Training Mode</div>
         <div class="mode-grid" role="radiogroup" aria-label="Training mode">
           <button class="mode-card" type="button" data-mode="passive" role="radio" aria-checked="false">
             <div>
               <div class="mode-card-top">
                 <span class="role-pill support">Support Torque</span>
+                <span class="mode-rec-badge" data-rec-badge="passive" hidden>★ Clinical Rec</span>
                 <span class="selected-check">Selected ✓</span>
               </div>
               <h2 class="mode-title">Passive Assist</h2>
@@ -63,13 +67,14 @@
                 <path d="M8 28 C45 28, 60 14, 100 14 C140 14, 155 28, 192 28" stroke="#3f580c" stroke-width="2.5" fill="none" stroke-linecap="round" />
               </svg>
             </div>
-            <div class="mode-meta">Suggested: 15 reps · Support 4–25 N·m</div>
+            <div class="mode-meta" data-mode-meta="passive">Suggested: 15 reps · Support 4–25 N·m</div>
           </button>
 
           <button class="mode-card selected" type="button" data-mode="isotonic" role="radio" aria-checked="true">
             <div>
               <div class="mode-card-top">
                 <span class="role-pill resistance">Resistance Torque</span>
+                <span class="mode-rec-badge" data-rec-badge="isotonic" hidden>★ Clinical Rec</span>
                 <span class="selected-check">Selected ✓</span>
               </div>
               <h2 class="mode-title">Isotonic Mode</h2>
@@ -82,13 +87,14 @@
                 <path d="M8 31 C40 31, 68 8, 105 8 C142 8, 165 25, 192 29" stroke="#3f580c" stroke-width="2.5" fill="none" stroke-linecap="round" />
               </svg>
             </div>
-            <div class="mode-meta">Suggested: 12 reps · Resistance 5–68 N·m</div>
+            <div class="mode-meta" data-mode-meta="isotonic">Suggested: 12 reps · Resistance 5–68 N·m</div>
           </button>
 
           <button class="mode-card" type="button" data-mode="isokinetic" role="radio" aria-checked="false">
             <div>
               <div class="mode-card-top">
                 <span class="role-pill resistance">Resistance Torque</span>
+                <span class="mode-rec-badge" data-rec-badge="isokinetic" hidden>★ Clinical Rec</span>
                 <span class="selected-check">Selected ✓</span>
               </div>
               <h2 class="mode-title">Isokinetic Mode</h2>
@@ -101,7 +107,7 @@
                 <path d="M8 30 L32 13 H168 L192 30" stroke="#3f580c" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
             </div>
-            <div class="mode-meta">Suggested: 10 reps · Resistance 10–68 N·m</div>
+            <div class="mode-meta" data-mode-meta="isokinetic">Suggested: 10 reps · Resistance 10–68 N·m</div>
           </button>
         </div>
 
@@ -110,7 +116,7 @@
           <div>
             <h2>How many reps?</h2>
             <div class="therapist-suggestion" id="therapistSuggestionBox">
-              <span>Therapist suggested for <strong id="suggestedModeName">Isotonic Mode</strong>: <strong id="suggestedRepCount">12 reps</strong></span>
+              <span><span id="suggestionSourceLabel">Therapist suggested</span> for <strong id="suggestedModeName">Isotonic Mode</strong>: <strong id="suggestedRepCount">12 reps</strong></span>
               <button class="use-suggested-btn" id="useSuggestedBtn" type="button">Use suggested</button>
             </div>
           </div>
@@ -217,6 +223,7 @@
                 <button class="torque-step-btn" id="torquePlusBtn" type="button" aria-label="Increase torque">+</button>
               </div>
               <p class="esp-cmd-status" id="espCommandStatus" role="status">Ready to send torque adjustments to ESP.</p>
+              <p class="esp-cmd-rec" id="activeTorqueRec" hidden></p>
             </div>
           </article>
         </div>

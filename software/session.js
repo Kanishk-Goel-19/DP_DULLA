@@ -5,10 +5,19 @@ const youtubeFrame = $("youtubeBackground");
 let socket = null;
 let deviceMode = "demo";
 let wsUrl = "";
+let bridgeWsPath = "";
 let wsConnected = false;
+let hadLiveEsp = false;
 let demoTimer = null;
 let rideClockTimer = null;
 let motionFrame = null;
+
+const MIN_CYCLING_TORQUE = 0;
+const MAX_CYCLING_TORQUE = 85;
+const STEP_CYCLING_TORQUE = 2;
+let targetTorque = 14;
+let prescription = null;
+let clinicalIntake = null;
 
 let paused = false;
 let ended = false;
@@ -132,29 +141,41 @@ function updateRideStatusUI() {
 
   if (wsConnected) {
     note.textContent = `Connected to ESP32 telemetry (${wsUrl}).`;
-  } else if (wsUrl) {
-    note.textContent = `ESP32 offline at ${wsUrl} — showing preview simulation.`;
+  } else if (deviceMode === "connected" && wsUrl) {
+    note.textContent = `Awaiting ESP32 stream at ${wsUrl} — showing preview simulation.`;
   } else {
     note.textContent = deviceMode === "demo"
       ? "Demo mode active — cycling metrics & cycles are simulated locally."
       : "Connected preview active — click End Session to save into Track Progress.";
   }
+  updateCyclingTorqueUI();
 }
 
 function updateFromESP(data) {
   if (!data || typeof data !== "object" || paused || ended) return;
+  const rawRpm = data.rpm ?? data.pedal_rpm ?? data.cadence;
+  const rawSpeed = data.speed ?? data.speed_kmh;
+  const rawTorque = data.torque ?? data.torque_nm ?? data.eddy_brake_torque ?? data.user_pedal_torque;
+  const rawReps = data.reps ?? data.pedal_cycles ?? data.cycles ?? data.completed_reps;
+
+  const hasRpm = rawRpm !== undefined && Number.isFinite(Number(rawRpm));
+  const hasSpeed = rawSpeed !== undefined && Number.isFinite(Number(rawSpeed));
+  const hasTorque = rawTorque !== undefined && Number.isFinite(Number(rawTorque));
+  if (!hasRpm && !hasSpeed && !hasTorque && rawReps === undefined) return;
+
+  const nextRpm = hasRpm ? Number(rawRpm) : animationTo.rpm;
   const next = {
-    rpm: Number.isFinite(Number(data.rpm)) ? Number(data.rpm) : animationTo.rpm,
-    speed: Number.isFinite(Number(data.speed)) ? Number(data.speed) : animationTo.speed,
-    torque: Number.isFinite(Number(data.torque)) ? Number(data.torque) : animationTo.torque
+    rpm: nextRpm,
+    speed: hasSpeed ? Number(rawSpeed) : animationTo.speed,
+    torque: hasTorque ? Number(rawTorque) : animationTo.torque
   };
   rpm = next.rpm;
   speed = next.speed;
   torque = next.torque;
   torqueSum += next.torque;
   torqueSamples += 1;
-  if (Number.isFinite(Number(data.reps))) {
-    simulatedCycles = Math.max(simulatedCycles, Number(data.reps));
+  if (rawReps !== undefined && Number.isFinite(Number(rawReps))) {
+    simulatedCycles = Math.max(simulatedCycles, Number(rawReps));
   }
   setMetricTargets(next);
 }
@@ -187,9 +208,11 @@ function startRideClock() {
     lastTickAt = now;
     if (!paused && !ended) {
       activeMs += dt;
-      // Count 1 cycling rep/cycle roughly every 3.5 seconds weighted by cadence.
-      const cadenceFactor = clamp(rpm / 75, 0.4, 1.8);
-      simulatedCycles += (dt / 3500) * cadenceFactor;
+      if (!wsConnected) {
+        // Count 1 cycling rep/cycle roughly every 3.5 seconds weighted by cadence when ESP32 stream is absent.
+        const cadenceFactor = clamp(rpm / 75, 0.4, 1.8);
+        simulatedCycles += (dt / 3500) * cadenceFactor;
+      }
       $("rideTimerText").textContent = formatDuration(activeMs);
       $("rideRepsText").textContent = `${Math.floor(simulatedCycles)} cycles`;
     }
@@ -217,7 +240,71 @@ function controlBackgroundPlayback(play) {
 function sendEspCommand(payload) {
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(payload));
+    return { sentLive: true };
   }
+  return { sentLive: false };
+}
+
+function buildCyclingStartPayload() {
+  const cyc = prescription?.cycling;
+  return {
+    type: "start_session",
+    mode: "cycling",
+    op_mode: 7,
+    role: "resistance",
+    torque_nm: targetTorque,
+    target_torque_ext: targetTorque,
+    target_reps: cyc?.suggestedCycles || 25,
+    pathology: clinicalIntake?.pathology ?? null,
+    d_offset_m: Number(((clinicalIntake?.dOffsetCm ?? 9.0) / 100).toFixed(3)),
+    L_leg_m: Number(((clinicalIntake?.lLegCm ?? 30.0) / 100).toFixed(3))
+  };
+}
+
+function updateCyclingTorqueUI() {
+  const valEl = $("cyclingTargetTorqueValue");
+  const minusBtn = $("cyclingTorqueMinusBtn");
+  const plusBtn = $("cyclingTorquePlusBtn");
+  const statusEl = $("cyclingCmdStatus");
+  if (valEl) valEl.textContent = `${targetTorque} Nm`;
+  if (minusBtn) minusBtn.disabled = targetTorque <= MIN_CYCLING_TORQUE || ended;
+  if (plusBtn) plusBtn.disabled = targetTorque >= MAX_CYCLING_TORQUE || ended;
+  if (statusEl && !statusEl.dataset.lockedMessage) {
+    if (ended) {
+      statusEl.textContent = "Session ended";
+    } else if (wsConnected) {
+      statusEl.textContent = `ESP32 Live · Target ${targetTorque} Nm`;
+    } else if (deviceMode === "connected" && wsUrl) {
+      statusEl.textContent = `Connecting to ESP32 · Target ${targetTorque} Nm`;
+    } else {
+      statusEl.textContent = deviceMode === "demo" ? "Demo mode · Ready for ESP" : "Connected preview · Target set";
+    }
+  }
+}
+
+function adjustCyclingTorque(delta) {
+  if (ended) return;
+  const next = clamp(targetTorque + delta, MIN_CYCLING_TORQUE, MAX_CYCLING_TORQUE);
+  if (next === targetTorque) return;
+  targetTorque = next;
+  const statusEl = $("cyclingCmdStatus");
+  if (statusEl) delete statusEl.dataset.lockedMessage;
+  const { sentLive } = sendEspCommand({
+    type: "set_torque",
+    mode: "cycling",
+    op_mode: 7,
+    role: "resistance",
+    torque_nm: next,
+    target_torque_ext: next,
+    delta
+  });
+  if (statusEl) {
+    statusEl.dataset.lockedMessage = "1";
+    statusEl.textContent = sentLive
+      ? `Sent to ESP: ${next} Nm`
+      : `Target set to ${next} Nm (offline)`;
+  }
+  updateCyclingTorqueUI();
 }
 
 const SCENE_VIDEOS = {
@@ -259,17 +346,65 @@ function changeScene(scene) {
 }
 
 function connectEspSocket() {
-  if (!wsUrl || !/^wss?:\/\//.test(wsUrl)) return;
+  if (deviceMode !== "connected" || !wsUrl) return;
+  const endpoint = bridgeWsPath
+    ? `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}${bridgeWsPath}`
+    : wsUrl;
+  const usingBridge = Boolean(bridgeWsPath);
+  if (!endpoint || !/^wss?:\/\//.test(endpoint)) return;
+
   try {
-    socket = new WebSocket(wsUrl);
+    socket = new WebSocket(endpoint);
     socket.addEventListener("open", () => {
-      wsConnected = true;
-      stopDemo();
-      updateRideStatusUI();
+      if (!usingBridge) {
+        wsConnected = true;
+        stopDemo();
+        updateRideStatusUI();
+        sendEspCommand(buildCyclingStartPayload());
+      } else {
+        updateRideStatusUI();
+      }
     });
     socket.addEventListener("message", (event) => {
-      try { updateFromESP(JSON.parse(event.data)); }
-      catch (error) { console.warn("Invalid ESP32 data packet", error); }
+      try {
+        const packet = JSON.parse(event.data);
+        if (!packet || typeof packet !== "object") return;
+
+        if (packet.type === "esp_status") {
+          wsConnected = Boolean(packet.connected);
+          const statusEl = $("cyclingCmdStatus");
+          if (statusEl) delete statusEl.dataset.lockedMessage;
+          if (wsConnected) {
+            stopDemo();
+            if (!paused && !ended) sendEspCommand(buildCyclingStartPayload());
+            if (paused) sendEspCommand({ type: "pause_session" });
+          } else if (!paused && !ended) {
+            startDemo();
+          }
+          updateRideStatusUI();
+          return;
+        }
+
+        if (packet.type === "esp_ack") {
+          if (packet.forwarded === false && $("cyclingCmdStatus")) {
+            $("cyclingCmdStatus").dataset.lockedMessage = "1";
+            $("cyclingCmdStatus").textContent = packet.message || "ESP32 offline — target saved locally";
+          }
+          return;
+        }
+
+        hadLiveEsp = true;
+        if (!wsConnected) {
+          wsConnected = true;
+          stopDemo();
+          const statusEl = $("cyclingCmdStatus");
+          if (statusEl) delete statusEl.dataset.lockedMessage;
+          updateRideStatusUI();
+        }
+        updateFromESP(packet);
+      } catch (error) {
+        console.warn("Invalid ESP32 data packet", error);
+      }
     });
     socket.addEventListener("close", () => {
       wsConnected = false;
@@ -313,7 +448,9 @@ async function persistCyclingSession() {
         torqueNm: avgTorque,
         reps,
         durationSeconds,
-        source: deviceMode === "demo" ? "demo" : "connected-preview"
+        source: (wsConnected || hadLiveEsp)
+          ? "esp32"
+          : (deviceMode === "demo" ? "demo" : "connected-preview")
       })
     });
     const data = await response.json();
@@ -365,14 +502,18 @@ function restartCyclingSession() {
   paused = false;
   saved = false;
   saving = false;
+  hadLiveEsp = false;
   activeMs = 0;
   simulatedCycles = 0;
   torqueSum = 0;
   torqueSamples = 0;
   lastTickAt = performance.now();
+  const statusEl = $("cyclingCmdStatus");
+  if (statusEl) delete statusEl.dataset.lockedMessage;
   $("sessionSummaryModal").hidden = true;
   controlBackgroundPlayback(true);
-  if (!wsConnected) startDemo();
+  if (wsConnected) sendEspCommand(buildCyclingStartPayload());
+  else startDemo();
   startRideClock();
   updateRideStatusUI();
 }
@@ -383,14 +524,70 @@ function updateClock() {
   }).format(new Date());
 }
 
+function renderCyclingPrescription(rx) {
+  const banner = $("cyclingRecBanner");
+  const menuNote = $("cyclingRxNote");
+  if (!banner) return;
+
+  if (!rx || !rx.cycling) {
+    banner.hidden = true;
+    if (menuNote) menuNote.hidden = true;
+    return;
+  }
+
+  const cyc = rx.cycling;
+  banner.textContent = "";
+  banner.hidden = false;
+  banner.classList.toggle("is-caution", !cyc.allowed);
+
+  const textWrap = document.createElement("div");
+  textWrap.className = "cycling-rx-text";
+
+  const badge = document.createElement("span");
+  badge.className = "cycling-rx-badge";
+  badge.textContent = cyc.allowed ? `${rx.protocolId} · Suggested` : `${rx.protocolId} · Caution`;
+
+  const msg = document.createElement("span");
+  msg.textContent = cyc.allowed
+    ? `${cyc.modeName} · Target ${cyc.targetTorqueNm} Nm (${cyc.torqueRangeNm}) · ${cyc.cadenceRangeRpm} RPM · ${cyc.powerRangeW} · ${cyc.durationMin} min`
+    : `${cyc.priorityLabel} — ${cyc.note}`;
+
+  textWrap.append(badge, msg);
+
+  const action = document.createElement("a");
+  action.className = "cycling-rx-action";
+  action.href = cyc.allowed ? "/intake" : "/device/flexion/";
+  action.textContent = cyc.allowed ? "Update Intake →" : "Switch to Flexion →";
+
+  banner.append(textWrap, action);
+
+  if (menuNote) {
+    menuNote.hidden = false;
+    menuNote.textContent = cyc.allowed
+      ? `Rx: ${cyc.modeName}, ${cyc.targetTorqueNm} Nm, ${cyc.cadenceRangeRpm} RPM, ${cyc.durationMin} min.`
+      : `Rx Hold: ${cyc.priorityLabel}. Use Flexion & Extension until ROM >= 100°.`;
+  }
+}
+
 async function initSession() {
   try {
-    const res = await fetch("/api/device/config", { credentials: "same-origin" });
+    const res = await fetch("/api/device/config", {
+      credentials: "same-origin",
+      cache: "no-store"
+    });
     if (res.ok) {
       const data = await res.json();
       if (data.ok) {
         deviceMode = data.deviceMode === "connected" ? "connected" : "demo";
         wsUrl = data.wsUrl || "";
+        bridgeWsPath = data.bridgeWsPath || "";
+        prescription = data.prescription || null;
+        clinicalIntake = data.clinicalIntake || null;
+        const rxTorque = Number(prescription?.cycling?.targetTorqueNm);
+        if (Number.isFinite(rxTorque) && rxTorque > 0) {
+          targetTorque = clamp(Math.round(rxTorque), MIN_CYCLING_TORQUE, MAX_CYCLING_TORQUE);
+        }
+        renderCyclingPrescription(prescription);
       }
     }
   } catch {}
@@ -411,6 +608,8 @@ $("pauseResumeBtn").addEventListener("click", togglePauseSession);
 $("endSessionBtn").addEventListener("click", endCyclingSession);
 $("retrySaveBtn").addEventListener("click", () => void persistCyclingSession());
 $("restartRideBtn").addEventListener("click", restartCyclingSession);
+$("cyclingTorqueMinusBtn")?.addEventListener("click", () => adjustCyclingTorque(-STEP_CYCLING_TORQUE));
+$("cyclingTorquePlusBtn")?.addEventListener("click", () => adjustCyclingTorque(STEP_CYCLING_TORQUE));
 
 $("fullscreenButton").addEventListener("click", async () => {
   try {

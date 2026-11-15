@@ -2,6 +2,7 @@ import { randomBytes, randomInt, scrypt as scryptCallback, timingSafeEqual, crea
 import { promisify } from 'node:util'
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises'
 import path from 'node:path'
+import { computeClinicalPrescription, normalizeIntake } from './clinical.mjs'
 
 const scrypt = promisify(scryptCallback)
 const gmail = /^[^\s@]+@gmail\.com$/i
@@ -18,6 +19,7 @@ export class AuthStore {
     this.verified = new Map()
     this.sessions = new Map()
     this.progress = []
+    this.usersWrite = Promise.resolve()
     this.progressWrite = Promise.resolve()
   }
 
@@ -30,9 +32,12 @@ export class AuthStore {
   }
 
   async saveUsers() {
-    const temp = this.usersFile + '.tmp'
-    await writeFile(temp, JSON.stringify(this.users, null, 2))
-    await rename(temp, this.usersFile)
+    this.usersWrite = this.usersWrite.catch(() => {}).then(async () => {
+      const temp = this.usersFile + '.tmp'
+      await writeFile(temp, JSON.stringify(this.users, null, 2))
+      await rename(temp, this.usersFile)
+    })
+    await this.usersWrite
   }
 
   get(email) { return this.users.find(u => u.email === normalizeEmail(email)) }
@@ -65,7 +70,15 @@ export class AuthStore {
     if (!current) throw new Error('Please verify your Gmail first.')
     if (typeof password !== 'string' || password.length < 6) throw new Error('Password must have at least 6 characters.')
     if (this.get(current.email)) throw new Error('An account already exists with this Gmail.')
-    const user = { id: randomBytes(12).toString('hex'), name: current.name, email: current.email, passwordHash: await hashPassword(password) }
+    const user = {
+      id: randomBytes(12).toString('hex'),
+      name: current.name,
+      email: current.email,
+      passwordHash: await hashPassword(password),
+      needsIntake: true,
+      clinicalIntake: null,
+      prescription: null,
+    }
     this.users.push(user)
     await this.saveUsers()
     this.verified.delete(ticket)
@@ -86,7 +99,29 @@ export class AuthStore {
     return { token, user: this.profile(user) }
   }
 
-  profile(user) { return { id: user.id, name: user.name, email: user.email } }
+  profile(user) {
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      needsIntake: Boolean(user.needsIntake),
+      intakeCompleted: Boolean(user.prescription),
+      clinicalIntake: user.clinicalIntake || null,
+      prescription: user.prescription || null,
+    }
+  }
+
+  async setClinicalIntake(userId, rawIntake) {
+    const user = this.users.find(u => u.id === userId)
+    if (!user) throw new Error('Please log in first.')
+    const clinicalIntake = normalizeIntake(rawIntake)
+    const prescription = computeClinicalPrescription(clinicalIntake)
+    user.clinicalIntake = clinicalIntake
+    user.prescription = prescription
+    user.needsIntake = false
+    await this.saveUsers()
+    return this.profile(user)
+  }
 
   getSession(token) {
     const id = this.sessions.get(token)
@@ -107,7 +142,7 @@ export class AuthStore {
     const rawTorque = details?.torqueNm === undefined || details?.torqueNm === null || details?.torqueNm === '' ? null : Number(details.torqueNm)
     if (!['Support', 'Resistance', 'Cycling'].includes(type)) throw new Error('Select a valid exercise type.')
     if (!Number.isInteger(reps) || reps < 1 || reps > 99) throw new Error('Repetitions must be between 1 and 99.')
-    if (!['demo', 'connected-preview'].includes(source)) throw new Error('Invalid session mode.')
+    if (!['demo', 'connected-preview', 'esp32'].includes(source)) throw new Error('Invalid session mode.')
     if (!Number.isFinite(durationSeconds) || durationSeconds < 0 || durationSeconds > 86400) throw new Error('Invalid session duration.')
     if (rawTorque !== null && (!Number.isFinite(rawTorque) || rawTorque < 0 || rawTorque > 200)) throw new Error('Invalid torque value.')
 
@@ -119,7 +154,7 @@ export class AuthStore {
       ...(rawTorque !== null ? { torqueNm: Math.round(rawTorque * 10) / 10 } : {}),
       reps,
       source,
-      verifiedByDevice: false,
+      verifiedByDevice: source === 'esp32' && Boolean(details?.verifiedByDevice),
       durationSeconds: Math.round(durationSeconds),
       date: new Date().toISOString()
     }

@@ -6,64 +6,80 @@
     <meta name="theme-color" content="#f2f8f5" />
     <title>DOULA | Choose Session</title>
     <link rel="stylesheet" href="session-select.css" />
+    <script defer src="session-select.js"></script>
   </head>
   <body>
-    <header class="selector-bar" aria-label="Dashboard navigation">
-      <a class="selector-pill selector-pill-home" href="/dashboard">← Dashboard</a>
-      <a class="selector-pill selector-pill-progress" href="/progress">See Progress ↗</a>
-    </header>
-
-    <main class="choice-stage" aria-label="Choose rehabilitation session type">
-      <a class="choice-panel choice-cycling" href="cycling/" id="choose-cycling">
-        <div class="choice-top">
-          <span class="choice-eyebrow">DOULA · Bottom Tier</span>
-          <span class="choice-tag">Eddy-Current Ergometer</span>
+    <div class="selector-shell">
+      <header class="selector-bar" aria-label="Dashboard navigation">
+        <a class="selector-pill selector-pill-home" href="/dashboard">← Dashboard</a>
+        <div class="selector-actions">
+          <a class="selector-pill selector-pill-home" href="/intake">Clinical Intake</a>
+          <a class="selector-pill selector-pill-progress" href="/progress">See Progress ↗</a>
         </div>
+      </header>
 
-        <div class="choice-visual" aria-hidden="true">
-          <div class="visual-frame">
-            <svg class="choice-svg" viewBox="0 0 180 140" stroke-width="3">
-              <circle cx="90" cy="70" r="46" class="choice-accent-stroke" stroke-dasharray="6 7" />
-              <circle cx="90" cy="70" r="34" />
-              <circle cx="90" cy="70" r="7" />
-              <path d="M90 70 116 48M111 45h14M90 70 64 92M55 95h14" />
-              <path d="M32 108c16-10 30 6 48 0s34-12 68 0" class="choice-accent-stroke" stroke-width="2.2" />
-            </svg>
+      <section id="clinicalBanner" class="clinical-banner" aria-live="polite" hidden></section>
+
+      <main class="choice-stage" aria-label="Choose rehabilitation session type">
+        <a class="choice-panel choice-cycling" href="cycling/" id="choose-cycling">
+          <div class="choice-top">
+            <div class="choice-top-meta">
+              <span class="choice-eyebrow">DOULA · Bottom Tier</span>
+              <span class="choice-rec-pill" id="cyclingRecPill" hidden></span>
+            </div>
+            <span class="choice-tag">Eddy-Current Ergometer</span>
           </div>
-        </div>
 
-        <div class="choice-bottom">
-          <h1 class="choice-title">Cycling<br />Session</h1>
-          <p class="choice-desc">Symmetrical lower-tier cycling with live RPM, speed, torque telemetry, and immersive POV scenery.</p>
-          <span class="choice-cta">Start Cycling Session <span aria-hidden="true">→</span></span>
-        </div>
-      </a>
-
-      <a class="choice-panel choice-flexion" href="flexion/" id="choose-flexion">
-        <div class="choice-top">
-          <span class="choice-eyebrow">DOULA · Top Hub</span>
-          <span class="choice-tag">Motorized Knee Control</span>
-        </div>
-
-        <div class="choice-visual" aria-hidden="true">
-          <div class="visual-frame">
-            <svg class="choice-svg" viewBox="0 0 180 140" stroke-width="3">
-              <path d="M46 98A48 48 0 0 1 134 98" class="choice-accent-stroke" stroke-dasharray="6 7" />
-              <path d="M90 88V36" />
-              <path d="M90 88 132 112" />
-              <circle cx="90" cy="88" r="10" />
-              <circle cx="132" cy="112" r="5" class="choice-accent-stroke" />
-              <path d="M68 58a34 34 0 0 1 48 12" class="choice-accent-stroke" stroke-width="2.2" />
-            </svg>
+          <div class="choice-visual" aria-hidden="true">
+            <div class="visual-frame">
+              <svg class="choice-svg" viewBox="0 0 180 140" stroke-width="3">
+                <circle cx="90" cy="70" r="46" class="choice-accent-stroke" stroke-dasharray="6 7" />
+                <circle cx="90" cy="70" r="34" />
+                <circle cx="90" cy="70" r="7" />
+                <path d="M90 70 116 48M111 45h14M90 70 64 92M55 95h14" />
+                <path d="M32 108c16-10 30 6 48 0s34-12 68 0" class="choice-accent-stroke" stroke-width="2.2" />
+              </svg>
+            </div>
           </div>
-        </div>
 
-        <div class="choice-bottom">
-          <h2 class="choice-title">Flexion &amp;<br />Extension</h2>
-          <p class="choice-desc">Passive assist, physiological curve-shaped isotonic, and isokinetic rep training with live torque control.</p>
-          <span class="choice-cta">Configure Flexion &amp; Extension <span aria-hidden="true">→</span></span>
-        </div>
-      </a>
-    </main>
+          <div class="choice-bottom">
+            <h1 class="choice-title">Cycling<br />Session</h1>
+            <p class="choice-desc">Symmetrical lower-tier cycling with live RPM, speed, torque telemetry, and immersive POV scenery.</p>
+            <div class="choice-rx-box" id="cyclingRecBox" hidden></div>
+            <span class="choice-cta">Start Cycling Session <span aria-hidden="true">→</span></span>
+          </div>
+        </a>
+
+        <a class="choice-panel choice-flexion" href="flexion/" id="choose-flexion">
+          <div class="choice-top">
+            <div class="choice-top-meta">
+              <span class="choice-eyebrow">DOULA · Top Hub</span>
+              <span class="choice-rec-pill" id="flexionRecPill" hidden></span>
+            </div>
+            <span class="choice-tag">Motorized Knee Control</span>
+          </div>
+
+          <div class="choice-visual" aria-hidden="true">
+            <div class="visual-frame">
+              <svg class="choice-svg" viewBox="0 0 180 140" stroke-width="3">
+                <path d="M46 98A48 48 0 0 1 134 98" class="choice-accent-stroke" stroke-dasharray="6 7" />
+                <path d="M90 88V36" />
+                <path d="M90 88 132 112" />
+                <circle cx="90" cy="88" r="10" />
+                <circle cx="132" cy="112" r="5" class="choice-accent-stroke" />
+                <path d="M68 58a34 34 0 0 1 48 12" class="choice-accent-stroke" stroke-width="2.2" />
+              </svg>
+            </div>
+          </div>
+
+          <div class="choice-bottom">
+            <h2 class="choice-title">Flexion &amp;<br />Extension</h2>
+            <p class="choice-desc">Passive assist, physiological curve-shaped isotonic, and isokinetic rep training with live torque control.</p>
+            <div class="choice-rx-box" id="flexionRecBox" hidden></div>
+            <span class="choice-cta">Configure Flexion &amp; Extension <span aria-hidden="true">→</span></span>
+          </div>
+        </a>
+      </main>
+    </div>
   </body>
 </html>
