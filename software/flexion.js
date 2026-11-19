@@ -1,942 +1,1466 @@
-const MODES = {
-  passive: {
-    id: 'passive',
-    name: 'Passive Assist Mode',
-    shortName: 'Passive Assist',
-    progressType: 'Support',
-    role: 'support',
-    roleLabel: 'Support Torque',
-    eyebrow: 'Support Torque · ESP',
-    setpointLabel: 'Support Target → ESP',
-    opMode: 3,
-    suggestedReps: 15,
-    defaultTorque: 12,
-    minTorque: 4,
-    maxTorque: 25,
-    stepTorque: 1,
-  },
-  isotonic: {
-    id: 'isotonic',
-    name: 'Physiological Curve-Shaped Isotonic',
-    shortName: 'Isotonic Mode',
-    progressType: 'Resistance',
-    role: 'resistance',
-    roleLabel: 'Resistance Torque',
-    eyebrow: 'Resistance Torque · ESP',
-    setpointLabel: 'Resistance Target → ESP',
-    opMode: 4,
-    suggestedReps: 12,
-    defaultTorque: 25,
-    minTorque: 5,
-    maxTorque: 68,
-    stepTorque: 1,
-  },
-  isokinetic: {
-    id: 'isokinetic',
-    name: 'Isokinetic Mode',
-    shortName: 'Isokinetic Mode',
-    progressType: 'Resistance',
-    role: 'resistance',
-    roleLabel: 'Resistance Torque',
-    eyebrow: 'Resistance Torque · ESP',
-    setpointLabel: 'Resistance Cap → ESP',
-    opMode: 5,
-    suggestedReps: 10,
-    defaultTorque: 35,
-    minTorque: 10,
-    maxTorque: 68,
-    stepTorque: 1,
-  },
-}
+(function () {
+  "use strict";
 
-const PRESET_REPS = [8, 10, 12, 15, 20]
-const MIN_REPS = 1
-const MAX_REPS = 99
-const ARC_CX = 130
-const ARC_CY = 125
-const ARC_RADIUS = 92
+  const MODE_CATALOG = {
+    passive: {
+      key: "passive",
+      opMode: 3, // OP_CPM
+      title: "Passive Assist",
+      clinicalLabel: "Motor-Assisted CPM Motion",
+      role: "support",
+      rolePillText: "Support Torque",
+      odometerTitle: "Support Torque · ESP",
+      odometerSubLabel: "Support Torque",
+      setpointLabel: "Support Target → ESP",
+      suggestedReps: 15,
+      repPresets: [10, 15, 20, 25],
+      minTorque: 4,
+      maxTorque: 25,
+      defaultTarget: 12,
+      defaultVel: 18,
+      step: 1,
+      simAmplitude: 1.8
+    },
+    isotonic: {
+      key: "isotonic",
+      opMode: 4, // OP_ISOTONIC
+      title: "Isotonic Mode",
+      clinicalLabel: "Physiological Curve-Shaped Isotonic",
+      role: "resistance",
+      rolePillText: "Resistance Torque",
+      odometerTitle: "Resistance Torque · ESP",
+      odometerSubLabel: "Resistance Torque",
+      setpointLabel: "Resistance Target → ESP",
+      suggestedReps: 12,
+      repPresets: [8, 10, 12, 15],
+      minTorque: 5,
+      maxTorque: 68,
+      defaultTarget: 25,
+      defaultVel: 60,
+      step: 2,
+      simAmplitude: 3.4
+    },
+    isokinetic: {
+      key: "isokinetic",
+      opMode: 5, // OP_ISOKINETIC
+      title: "Isokinetic Mode",
+      clinicalLabel: "Constant-Velocity Accommodating",
+      role: "resistance",
+      rolePillText: "Resistance Torque",
+      odometerTitle: "Resistance Torque · ESP",
+      odometerSubLabel: "Resistance Torque",
+      setpointLabel: "Resistance Target → ESP",
+      suggestedReps: 10,
+      repPresets: [6, 8, 10, 12],
+      minTorque: 10,
+      maxTorque: 68,
+      defaultTarget: 35,
+      defaultVel: 45,
+      step: 2,
+      simAmplitude: 5.0
+    },
+    active_assist: {
+      key: "active_assist",
+      opMode: 11, // OP_ACTIVE_ASSIST
+      title: "Active Assist",
+      clinicalLabel: "Trigger-and-Go Active Assist",
+      role: "support",
+      rolePillText: "Support Torque",
+      odometerTitle: "Support Torque · ESP",
+      odometerSubLabel: "Support Torque",
+      setpointLabel: "Support Target → ESP",
+      suggestedReps: 12,
+      repPresets: [8, 10, 12, 15],
+      minTorque: 4,
+      maxTorque: 25,
+      defaultTarget: 12,
+      defaultVel: 25,
+      step: 1,
+      simAmplitude: 2.0
+    },
+    isometric: {
+      key: "isometric",
+      opMode: 6, // OP_ISOMETRIC
+      title: "Isometric Hold",
+      clinicalLabel: "Isometric Angle-Lock Hold",
+      role: "resistance",
+      rolePillText: "Resistance Torque",
+      odometerTitle: "Hold Torque · ESP",
+      odometerSubLabel: "Isometric Torque",
+      setpointLabel: "Hold Torque Cap → ESP",
+      suggestedReps: 8,
+      repPresets: [5, 8, 10, 12],
+      minTorque: 5,
+      maxTorque: 45,
+      defaultTarget: 20,
+      defaultVel: 60,
+      step: 2,
+      simAmplitude: 2.2
+    }
+  };
 
-const boltIcon = '<svg aria-hidden="true" viewBox="0 0 32 32" fill="none" stroke="currentColor"><path d="M18.5 2.5 8 17h7l-1.5 12.5L24 14.5h-7l1.5-12Z" stroke-width="1.5" stroke-linejoin="round"/></svg>'
-const cycleIcon = '<svg aria-hidden="true" viewBox="0 0 32 32" fill="none" stroke="currentColor"><circle cx="9" cy="22" r="5.5" stroke-width="1.5"/><circle cx="24" cy="22" r="5.5" stroke-width="1.5"/><path d="m9 22 5-10 4 10m-9 0h9l-5-7h8M13 9h4" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  const state = {
+    modeKey: "isotonic",
+    targetReps: MODE_CATALOG.isotonic.suggestedReps,
+    completedReps: 0,
+    targetTorque: MODE_CATALOG.isotonic.defaultTarget,
+    liveTorque: 0,
+    peakTorque: 0,
+    torqueSum: 0,
+    torqueSamples: 0,
+    startedAtMs: 0,
+    active: false,
+    paused: false,
+    ended: false,
+    estopped: false,
+    autoSim: true,
+    espConnected: false,
+    u2Linked: false,
+    u2Homed: false,
+    u2Calibrated: false,
+    u2BusyHoming: false,
+    u2HardStop: false,
+    u2Spasm: false,
+    kneeAngleDeg: 0,
+    kneeVelDegS: 0,
+    vbusVolts: 0,
+    motorCurrentA: 0,
+    lastRepWorkJ: 0,
+    wsUrl: null,
+    clinicalRx: null,
+    romWindowDeg: [0, 110],
+    targetVelDegS: 60,
+    dOffsetM: 0.250,
+    lLegM: 0.300,
+    pathologyCode: 0,
+    simPhase: 0,
+    simRepElapsedMs: 0,
+    sessionSaved: false,
+    savingSession: false,
+    lastSavePayload: null,
+    lastLocalTorqueSetMs: 0,
+    lastLocalKinSetMs: 0
+  };
 
-const $ = (id) => document.getElementById(id)
-const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
-const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3)
-const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]))
+  let socket = null;
+  let reconnectTimer = null;
+  let simTimer = null;
+  let pendingOpenCommands = [];
 
-const state = {
-  mode: 'isotonic',
-  targetReps: MODES.isotonic.suggestedReps,
-  completedReps: 0,
-  targetTorque: MODES.isotonic.defaultTorque,
-  liveTorque: 0,
-  visualTorque: 0,
-  paused: false,
-  estopped: false,
-  active: false,
-  ended: false,
-  saving: false,
-  saved: false,
-  deviceMode: 'demo',
-  bypassEsp: false,
-  wsUrl: '',
-  bridgeWsPath: '',
-  wsConnected: false,
-  hadLiveEsp: false,
-  demoRunning: true,
-  startedAt: 0,
-  pausedAt: 0,
-  pausedMs: 0,
-  sessions: [],
-  prescription: null,
-  clinicalIntake: null,
-  userEditedSetup: false,
-}
+  // DOM References
+  const menuToggleBtn = document.getElementById("menuToggleBtn");
+  const mobileNavDrawer = document.getElementById("mobileNavDrawer");
+  const connectionBadge = document.getElementById("connectionBadge");
 
-let socket = null
-let simTimer = null
-let autoRepAccumulator = 0
-let animFromTorque = 0
-let animToTorque = 0
-let animStartedAt = 0
-let animFrame = null
+  // Top-Hub Hardware Bar References
+  const topHubLinkTitle = document.getElementById("topHubLinkTitle");
+  const quickHomeBtn = document.getElementById("quickHomeBtn");
+  const autoHomeBtn = document.getElementById("autoHomeBtn");
+  const releaseLockBtn = document.getElementById("releaseLockBtn");
+  const thLinkChip = document.getElementById("thLinkChip");
+  const thHomeChip = document.getElementById("thHomeChip");
+  const thAngleChip = document.getElementById("thAngleChip");
+  const thPowerChip = document.getElementById("thPowerChip");
+  const thWorkChip = document.getElementById("thWorkChip");
+  const thAngleBarFill = document.getElementById("thAngleBarFill");
+  const topHubStatusNote = document.getElementById("topHubStatusNote");
 
-function buildOdometerTicks() {
-  const group = $('odoTicks')
-  const ns = 'http://www.w3.org/2000/svg'
-  const total = 32
-  for (let i = 0; i <= total; i += 1) {
-    const angle = (135 + (270 * i) / total) * (Math.PI / 180)
-    const isMajor = i % 4 === 0
-    const r1 = ARC_RADIUS - (isMajor ? 16 : 12)
-    const r2 = ARC_RADIUS - 7
-    const line = document.createElementNS(ns, 'line')
-    line.setAttribute('x1', (ARC_CX + Math.cos(angle) * r1).toFixed(2))
-    line.setAttribute('y1', (ARC_CY + Math.sin(angle) * r1).toFixed(2))
-    line.setAttribute('x2', (ARC_CX + Math.cos(angle) * r2).toFixed(2))
-    line.setAttribute('y2', (ARC_CY + Math.sin(angle) * r2).toFixed(2))
-    if (isMajor) line.classList.add('major')
-    group.appendChild(line)
+  const setupView = document.getElementById("setupView");
+  const activeView = document.getElementById("activeView");
+  const clinicalFlexionCard = document.getElementById("clinicalFlexionCard");
+  const modeCards = Array.from(document.querySelectorAll(".mode-card"));
+  const extraModePills = Array.from(document.querySelectorAll(".mode-pill-extra"));
+  const suggestionSourceLabel = document.getElementById("suggestionSourceLabel");
+  const suggestedModeName = document.getElementById("suggestedModeName");
+  const suggestedRepCount = document.getElementById("suggestedRepCount");
+  const useSuggestedBtn = document.getElementById("useSuggestedBtn");
+  const repPresets = document.getElementById("repPresets");
+  const repMinusBtn = document.getElementById("repMinusBtn");
+  const repPlusBtn = document.getElementById("repPlusBtn");
+  const repTargetDisplay = document.getElementById("repTargetDisplay");
+  const romMinInput = document.getElementById("romMinInput");
+  const romMaxInput = document.getElementById("romMaxInput");
+  const activeRomMinInput = document.getElementById("activeRomMinInput");
+  const activeRomMaxInput = document.getElementById("activeRomMaxInput");
+  const applyActiveRomBtn = document.getElementById("applyActiveRomBtn");
+  const romPresetBtns = Array.from(document.querySelectorAll(".rom-preset-btn"));
+  const velInputLabel = document.getElementById("velInputLabel");
+  const velUnitText = document.getElementById("velUnitText");
+  const targetVelInput = document.getElementById("targetVelInput");
+  const applyKinematicsBtn = document.getElementById("applyKinematicsBtn");
+  const setupSummary = document.getElementById("setupSummary");
+  const startWorkoutBtn = document.getElementById("startWorkoutBtn");
+
+  const activeModePill = document.getElementById("activeModePill");
+  const espStatusPill = document.getElementById("espStatusPill");
+  const backToSetupBtn = document.getElementById("backToSetupBtn");
+
+  const repsRemainingValue = document.getElementById("repsRemainingValue");
+  const repsRemainingCaption = document.getElementById("repsRemainingCaption");
+  const repsProgressText = document.getElementById("repsProgressText");
+  const activeSuggestedTag = document.getElementById("activeSuggestedTag");
+  const repProgressFill = document.getElementById("repProgressFill");
+  const sessionCompleteBanner = document.getElementById("sessionCompleteBanner");
+  const bannerTitle = document.getElementById("bannerTitle");
+  const bannerMessage = document.getElementById("bannerMessage");
+  const repeatSessionBtn = document.getElementById("repeatSessionBtn");
+  const chooseAnotherModeBtn = document.getElementById("chooseAnotherModeBtn");
+  const repTestControls = document.getElementById("repTestControls");
+  const simRepBtn = document.getElementById("simRepBtn");
+  const autoSimToggleBtn = document.getElementById("autoSimToggleBtn");
+
+  const torqueRoleEyebrow = document.getElementById("torqueRoleEyebrow");
+  const torqueSourceTag = document.getElementById("torqueSourceTag");
+  const odoTicks = document.getElementById("odoTicks");
+  const odoProgress = document.getElementById("odoProgress");
+  const odoTargetMarker = document.getElementById("odoTargetMarker");
+  const torqueValue = document.getElementById("torqueValue");
+  const torqueOdometerLabel = document.getElementById("torqueOdometerLabel");
+  const odoMaxLabel = document.getElementById("odoMaxLabel");
+  const torqueMinusBtn = document.getElementById("torqueMinusBtn");
+  const torquePlusBtn = document.getElementById("torquePlusBtn");
+  const setpointLabel = document.getElementById("setpointLabel");
+  const targetTorqueValue = document.getElementById("targetTorqueValue");
+  const espCommandStatus = document.getElementById("espCommandStatus");
+  const activeTorqueRec = document.getElementById("activeTorqueRec");
+
+  const saveFeedback = document.getElementById("saveFeedback");
+  const saveFeedbackText = document.getElementById("saveFeedbackText");
+  const retrySaveBtn = document.getElementById("retrySaveBtn");
+
+  const pauseSessionBtn = document.getElementById("pauseSessionBtn");
+  const endSessionBtn = document.getElementById("endSessionBtn");
+  const hardStopBtn = document.getElementById("hardStopBtn");
+  const historyList = document.getElementById("historyList");
+
+  function clamp(num, min, max) {
+    return Math.min(Math.max(num, min), max);
   }
-}
 
-function activeModeConfig() {
-  return MODES[state.mode]
-}
+  function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
 
-function recommendedConfigForMode(modeId) {
-  const cfg = MODES[modeId] || MODES.isotonic
-  const flx = state.prescription?.flexion
-  if (flx && flx.modeId === cfg.id) {
-    return {
-      isClinicalRec: true,
-      sourceLabel: `Clinical Decision Tree (${state.prescription.protocolId})`,
-      suggestedReps: clamp(Number(flx.suggestedReps) || cfg.suggestedReps, MIN_REPS, MAX_REPS),
-      targetTorque: clamp(Number(flx.targetTorqueNm) || cfg.defaultTorque, cfg.minTorque, cfg.maxTorque),
-      torqueRangeNm: flx.torqueRangeNm || `${cfg.minTorque}–${cfg.maxTorque} Nm`,
-      romText: Array.isArray(flx.romWindowDeg) ? `${flx.romWindowDeg[0]}°–${flx.romWindowDeg[1]}°` : '',
-      speedSpec: flx.speedSpec || '',
-      safetyTaper: flx.safetyTaper || '',
+  function currentMode() {
+    return MODE_CATALOG[state.modeKey] || MODE_CATALOG.isotonic;
+  }
+
+  function buildOdometerTicks() {
+    if (!odoTicks) return;
+    const cx = 130;
+    const cy = 125;
+    const rInner = 75;
+    const rOuterMajor = 83;
+    const rOuterMinor = 79;
+    const startDeg = 135;
+    const sweepDeg = 270;
+    const count = 18;
+    const lines = [];
+
+    for (let i = 0; i <= count; i += 1) {
+      const isMajor = i % 3 === 0;
+      const deg = startDeg + (sweepDeg * i) / count;
+      const rad = (deg * Math.PI) / 180;
+      const rOut = isMajor ? rOuterMajor : rOuterMinor;
+      const x1 = (cx + rInner * Math.cos(rad)).toFixed(2);
+      const y1 = (cy + rInner * Math.sin(rad)).toFixed(2);
+      const x2 = (cx + rOut * Math.cos(rad)).toFixed(2);
+      const y2 = (cy + rOut * Math.sin(rad)).toFixed(2);
+      lines.push(
+        `<line class="${isMajor ? "major" : ""}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" />`
+      );
+    }
+    odoTicks.innerHTML = lines.join("");
+  }
+
+  function setTargetMarkerAngle(ratio) {
+    if (!odoTargetMarker) return;
+    const clamped = clamp(ratio, 0, 1);
+    const deg = 135 + clamped * 270;
+    const rad = (deg * Math.PI) / 180;
+    const cx = 130;
+    const cy = 125;
+    const r = 92;
+    const x = cx + r * Math.cos(rad);
+    const y = cy + r * Math.sin(rad);
+    odoTargetMarker.setAttribute("cx", x.toFixed(2));
+    odoTargetMarker.setAttribute("cy", y.toFixed(2));
+  }
+
+  function setOdometerValue(nm) {
+    const mode = currentMode();
+    const safeNm = clamp(Number(nm) || 0, 0, mode.maxTorque);
+    state.liveTorque = safeNm;
+
+    if (state.active && !state.paused && !state.ended && safeNm > 0) {
+      if (safeNm > state.peakTorque) {
+        state.peakTorque = safeNm;
+      }
+      state.torqueSum += safeNm;
+      state.torqueSamples += 1;
+    }
+
+    if (torqueValue) {
+      torqueValue.textContent = safeNm.toFixed(1);
+    }
+    if (odoProgress) {
+      const ratio = clamp(safeNm / mode.maxTorque, 0, 1);
+      const offset = 1000 - ratio * 1000;
+      odoProgress.style.strokeDashoffset = offset.toFixed(1);
     }
   }
-  return {
-    isClinicalRec: false,
-    sourceLabel: 'Therapist suggested',
-    suggestedReps: cfg.suggestedReps,
-    targetTorque: cfg.defaultTorque,
-    torqueRangeNm: `${cfg.minTorque}–${cfg.maxTorque} N·m`,
-    romText: '',
-    speedSpec: '',
-    safetyTaper: '',
-  }
-}
 
-function renderClinicalFlexionCard() {
-  const card = $('clinicalFlexionCard')
-  if (!card) return
-  const rx = state.prescription
-
-  document.querySelectorAll('[data-rec-badge]').forEach((badge) => {
-    badge.hidden = !rx || badge.dataset.recBadge !== rx.flexion?.modeId
-  })
-
-  document.querySelectorAll('[data-mode-meta]').forEach((meta) => {
-    const modeId = meta.dataset.modeMeta
-    const rec = recommendedConfigForMode(modeId)
-    const cfg = MODES[modeId]
-    if (!cfg) return
-    const verb = cfg.role === 'support' ? 'Support' : 'Resistance'
-    meta.textContent = rec.isClinicalRec
-      ? `Recommended: ${rec.suggestedReps} reps · ${rec.targetTorque} N·m (${rec.torqueRangeNm})`
-      : `Default: ${cfg.suggestedReps} reps · ${verb} ${cfg.minTorque}–${cfg.maxTorque} N·m`
-  })
-
-  if (!rx) {
-    card.hidden = false
-    card.innerHTML = `
-      <div class="clinical-flexion-head">
-        <div>
-          <span class="clinical-flexion-eyebrow">Clinical Decision Tree · U1: ESP_MASTER</span>
-          <h2 class="clinical-flexion-title">Personalize your Flexion &amp; Extension settings</h2>
-        </div>
-        <div class="clinical-flexion-actions">
-          <a class="mini-pill-btn" href="/intake">Complete Clinical Intake →</a>
-        </div>
-      </div>
-      <p class="clinical-flexion-summary">Complete your Clinical Intake Questionnaire once to receive automatic mode, rep count, ROM window, and torque target recommendations here.</p>
-    `
-    return
-  }
-
-  const flx = rx.flexion
-  const lockChips = (rx.safetyLocks || [])
-    .map((lock) => `<span class="clinical-flexion-chip ${/Locked|Contraindicated|Precaution/i.test(lock) ? 'is-lock' : ''}">${escapeHtml(lock)}</span>`)
-    .join('')
-  const romChip = Array.isArray(flx.romWindowDeg)
-    ? `<span class="clinical-flexion-chip">ROM ${escapeHtml(flx.romWindowDeg[0])}°–${escapeHtml(flx.romWindowDeg[1])}°</span>`
-    : ''
-  const holdChip = flx.pauseHoldSec
-    ? `<span class="clinical-flexion-chip">${escapeHtml(flx.pauseHoldSec)}s isometric hold · ${escapeHtml(flx.speedSpec)}</span>`
-    : `<span class="clinical-flexion-chip">${escapeHtml(flx.speedSpec)}</span>`
-
-  card.hidden = false
-  card.innerHTML = `
-    <div class="clinical-flexion-head">
-      <div>
-        <span class="clinical-flexion-eyebrow">Clinical Decision Tree · ${escapeHtml(rx.phase)}</span>
-        <h2 class="clinical-flexion-title">${escapeHtml(rx.protocolId)}: ${escapeHtml(rx.headline)}</h2>
-      </div>
-      <div class="clinical-flexion-actions">
-        <button class="use-suggested-btn" id="applyRecBtn" type="button">Apply Recommended Settings</button>
-        <a class="mini-pill-btn" href="/intake">Update Intake →</a>
-      </div>
-    </div>
-    <p class="clinical-flexion-summary">${escapeHtml(rx.summary)}${flx.safetyTaper ? ` Safety rule: ${escapeHtml(flx.safetyTaper)}.` : ''}</p>
-    <div class="clinical-flexion-chips">
-      <span class="clinical-flexion-chip">Recommended Mode: ${escapeHtml(flx.modeName)}</span>
-      <span class="clinical-flexion-chip">Target Torque: ${escapeHtml(flx.targetTorqueNm)} N·m (${escapeHtml(flx.torqueRangeNm)})</span>
-      <span class="clinical-flexion-chip">Suggested Reps: ${escapeHtml(flx.suggestedReps)} reps</span>
-      ${romChip}
-      ${holdChip}
-      ${lockChips}
-    </div>
-  `
-
-  $('applyRecBtn')?.addEventListener('click', () => {
-    applyClinicalPrescription(rx, { force: true })
-  })
-}
-
-function applyClinicalPrescription(rx, { force = false } = {}) {
-  if (!rx?.flexion || !MODES[rx.flexion.modeId]) return
-  if (!force && state.userEditedSetup) return
-  const recCfg = MODES[rx.flexion.modeId]
-  state.mode = recCfg.id
-  state.targetReps = clamp(Number(rx.flexion.suggestedReps) || recCfg.suggestedReps, MIN_REPS, MAX_REPS)
-  state.targetTorque = clamp(Number(rx.flexion.targetTorqueNm) || recCfg.defaultTorque, recCfg.minTorque, recCfg.maxTorque)
-  state.userEditedSetup = false
-  updateSetupUI()
-}
-
-function formatDate(value) {
-  if (!value) return ''
-  const date = new Date(value)
-  return Number.isNaN(date.getTime())
-    ? escapeHtml(value)
-    : escapeHtml(date.toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }))
-}
-
-function renderHistory() {
-  const list = $('historyList')
-  if (!list) return
-  if (!state.sessions.length) {
-    list.innerHTML = '<div class="exercise-history-empty">No sessions recorded yet. Complete or end a session to save it here.</div>'
-    return
-  }
-  list.innerHTML = state.sessions.slice(0, 6).map((row) => {
-    const modeDetail = row.mode && row.mode !== row.type ? ` · ${escapeHtml(row.mode)}` : ''
-    const torqueDetail = Number.isFinite(Number(row.torqueNm)) ? ` · ${Number(row.torqueNm)} N·m` : ''
-    const sourceLabel = row.source === 'esp32'
-      ? (row.verifiedByDevice ? 'ESP32 Verified' : 'ESP32 Live')
-      : (row.source === 'demo' ? 'Demo' : 'Connected preview')
-    return `<article class="exercise-history-row">
-      <div class="exercise-history-icon">${row.type === 'Cycling' ? cycleIcon : boltIcon}</div>
-      <div class="exercise-history-info">
-        <strong>${escapeHtml(row.type)}${modeDetail}</strong>
-        <small>${formatDate(row.date)}${torqueDetail} · ${sourceLabel}</small>
-      </div>
-      <div class="exercise-history-count">
-        <strong>${Number(row.reps)}</strong>
-        <small>reps</small>
-      </div>
-    </article>`
-  }).join('')
-}
-
-async function loadHistory() {
-  try {
-    const res = await fetch('/api/progress', { credentials: 'same-origin' })
-    if (!res.ok) return
-    const data = await res.json()
-    if (data.ok && Array.isArray(data.sessions)) {
-      state.sessions = data.sessions
-      renderHistory()
+  function updateTargetTorqueUI() {
+    const mode = currentMode();
+    state.targetTorque = clamp(state.targetTorque, mode.minTorque, mode.maxTorque);
+    if (targetTorqueValue) {
+      targetTorqueValue.textContent = `${state.targetTorque} N·m`;
     }
-  } catch {}
-}
-
-function updateSetupUI() {
-  const modeCfg = activeModeConfig()
-  const rec = recommendedConfigForMode(modeCfg.id)
-
-  document.querySelectorAll('.mode-card').forEach((card) => {
-    const selected = card.dataset.mode === state.mode
-    card.classList.toggle('selected', selected)
-    card.setAttribute('aria-checked', String(selected))
-  })
-
-  if ($('suggestionSourceLabel')) $('suggestionSourceLabel').textContent = rec.sourceLabel
-  $('suggestedModeName').textContent = modeCfg.shortName
-  $('suggestedRepCount').textContent = `${rec.suggestedReps} reps`
-  $('repTargetDisplay').textContent = String(state.targetReps)
-  $('repMinusBtn').disabled = state.targetReps <= MIN_REPS
-  $('repPlusBtn').disabled = state.targetReps >= MAX_REPS
-
-  const presets = Array.from(new Set([...PRESET_REPS, rec.suggestedReps])).sort((a, b) => a - b)
-  const presetRoot = $('repPresets')
-  presetRoot.innerHTML = ''
-  for (const count of presets) {
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = 'rep-preset-btn'
-    if (count === state.targetReps) btn.classList.add('active')
-    if (count === rec.suggestedReps) btn.classList.add('is-suggested')
-    btn.textContent = `${count}`
-    btn.addEventListener('click', () => {
-      state.userEditedSetup = true
-      state.targetReps = count
-      updateSetupUI()
-    })
-    presetRoot.appendChild(btn)
-  }
-
-  const romSuffix = rec.romText ? ` · ROM ${escapeHtml(rec.romText)}` : ''
-  $('setupSummary').innerHTML = `<strong>${escapeHtml(modeCfg.name)}</strong> · ${state.targetReps} reps · Initial ${escapeHtml(modeCfg.roleLabel.toLowerCase())}: <strong>${state.targetTorque} N·m</strong>${romSuffix}`
-}
-
-function paintTorqueOdometer(torqueNm) {
-  const modeCfg = activeModeConfig()
-  const clamped = clamp(torqueNm, 0, modeCfg.maxTorque)
-  $('torqueValue').textContent = clamped.toFixed(1)
-  const fraction = clamp(clamped / modeCfg.maxTorque, 0, 1)
-  $('odoProgress').style.strokeDashoffset = (1000 * (1 - fraction)).toFixed(1)
-}
-
-function paintTargetMarker() {
-  const modeCfg = activeModeConfig()
-  const fraction = clamp(state.targetTorque / modeCfg.maxTorque, 0, 1)
-  const angle = (135 + 270 * fraction) * (Math.PI / 180)
-  const marker = $('odoTargetMarker')
-  marker.setAttribute('cx', (ARC_CX + Math.cos(angle) * ARC_RADIUS).toFixed(2))
-  marker.setAttribute('cy', (ARC_CY + Math.sin(angle) * ARC_RADIUS).toFixed(2))
-}
-
-function animateTorqueLoop(now) {
-  const progress = clamp((now - animStartedAt) / 280, 0, 1)
-  const eased = easeOutCubic(progress)
-  state.visualTorque = animFromTorque + (animToTorque - animFromTorque) * eased
-  paintTorqueOdometer(state.visualTorque)
-  if (progress < 1) {
-    animFrame = requestAnimationFrame(animateTorqueLoop)
-  } else {
-    state.visualTorque = animToTorque
-    paintTorqueOdometer(state.visualTorque)
-    animFrame = null
-  }
-}
-
-function setLiveTorque(nextTorque) {
-  const modeCfg = activeModeConfig()
-  const safe = clamp(Number(nextTorque), 0, modeCfg.maxTorque)
-  if (!Number.isFinite(safe)) return
-  state.liveTorque = safe
-  animFromTorque = state.visualTorque
-  animToTorque = safe
-  animStartedAt = performance.now()
-  if (animFrame === null) animFrame = requestAnimationFrame(animateTorqueLoop)
-}
-
-function updateCountdownUI() {
-  const remaining = Math.max(0, state.targetReps - state.completedReps)
-  const pct = state.targetReps > 0 ? clamp((state.completedReps / state.targetReps) * 100, 0, 100) : 100
-  $('repsRemainingValue').textContent = String(remaining)
-  $('repsRemainingCaption').textContent = remaining === 1 ? 'rep remaining' : 'reps remaining'
-  $('repsProgressText').textContent = `${state.completedReps} / ${state.targetReps} completed`
-  $('repProgressFill').style.width = `${pct.toFixed(1)}%`
-
-  const finished = remaining === 0 || state.ended
-  $('sessionCompleteBanner').hidden = !finished
-  $('simRepBtn').disabled = finished
-
-  if (remaining === 0 && !state.ended) {
-    $('bannerTitle').textContent = 'Session Complete'
-    $('bannerMessage').textContent = 'All target repetitions have been completed safely.'
-    if (!state.saved && !state.saving) {
-      stopDemoTelemetry()
-      void saveSessionProgress(state.targetReps)
+    if (odoMaxLabel) {
+      odoMaxLabel.textContent = String(mode.maxTorque);
     }
-  } else if (state.ended) {
-    $('bannerTitle').textContent = 'Session Ended'
-    $('bannerMessage').textContent = `Logged ${Math.max(1, state.completedReps)} repetition(s) for ${activeModeConfig().name}.`
-  }
-}
+    setTargetMarkerAngle(state.targetTorque / mode.maxTorque);
 
-function updateTorqueControlsUI() {
-  const modeCfg = activeModeConfig()
-  $('targetTorqueValue').textContent = `${state.targetTorque} N·m`
-  $('torqueMinusBtn').disabled = state.targetTorque <= modeCfg.minTorque
-  $('torquePlusBtn').disabled = state.targetTorque >= modeCfg.maxTorque
-  paintTargetMarker()
-}
-
-function updateEspStatusPill() {
-  const pill = $('espStatusPill')
-  const sourceTag = $('torqueSourceTag')
-  const testControls = $('repTestControls')
-  const topBadge = $('connectionBadge')
-
-  const isConnected = state.wsConnected || state.deviceMode === 'connected'
-  topBadge.className = `exercise-mode-indicator ${isConnected ? 'connected' : 'demo'}`
-  topBadge.textContent = isConnected ? '● ESP32 RESPONDED' : '● DEMO — NO ESP32'
-
-  pill.classList.remove('warn', 'error')
-  if (state.estopped) {
-    pill.textContent = '● Hard Stop Engaged'
-    pill.classList.add('error')
-    sourceTag.textContent = 'Hard Stop Active'
-    return
-  }
-
-  if (state.paused && !state.ended) {
-    pill.textContent = '● Paused'
-    pill.classList.add('warn')
-    sourceTag.textContent = 'Session Paused'
-  } else if (state.wsConnected) {
-    pill.textContent = '● Live ESP32 Telemetry'
-    sourceTag.textContent = 'From ESP WebSocket'
-    testControls.hidden = true
-  } else if (state.deviceMode === 'demo' || !state.wsUrl) {
-    pill.textContent = state.deviceMode === 'connected' ? '● Connected Preview' : '● Demo Simulation'
-    pill.classList.add('warn')
-    sourceTag.textContent = state.demoRunning ? 'Simulated ESP Stream' : 'Demo Paused'
-    testControls.hidden = false
-  } else {
-    pill.textContent = '● Connecting to ESP32…'
-    pill.classList.add('warn')
-    sourceTag.textContent = 'Awaiting ESP Packets'
-    testControls.hidden = false
-  }
-}
-
-function buildStartSessionPayload() {
-  const modeCfg = activeModeConfig()
-  const rx = state.prescription
-  const intake = state.clinicalIntake
-  return {
-    type: 'start_session',
-    mode: modeCfg.id,
-    op_mode: modeCfg.opMode,
-    role: modeCfg.role,
-    target_reps: state.targetReps,
-    torque_nm: state.targetTorque,
-    target_torque_ext: state.targetTorque,
-    rom_min_deg: rx?.flexion?.romWindowDeg?.[0] ?? intake?.romExt ?? 0,
-    rom_max_deg: rx?.flexion?.romWindowDeg?.[1] ?? intake?.romFlex ?? 110,
-    pathology: intake?.pathology ?? null,
-    d_offset_m: Number(((intake?.dOffsetCm ?? 9.0) / 100).toFixed(3)),
-    L_leg_m: Number(((intake?.lLegCm ?? 30.0) / 100).toFixed(3)),
-  }
-}
-
-function resolveEspSocketEndpoint() {
-  if (state.bridgeWsPath) {
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    return { endpoint: `${proto}://${window.location.host}${state.bridgeWsPath}`, usingBridge: true }
-  }
-  return { endpoint: state.wsUrl, usingBridge: false }
-}
-
-function sendEspCommand(payload) {
-  const serialized = JSON.stringify(payload)
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(serialized)
-    return { sentLive: true }
-  }
-  return { sentLive: false }
-}
-
-function adjustTorque(delta) {
-  const modeCfg = activeModeConfig()
-  const next = clamp(state.targetTorque + delta, modeCfg.minTorque, modeCfg.maxTorque)
-  if (next === state.targetTorque) return
-  state.targetTorque = next
-  updateTorqueControlsUI()
-
-  const payload = {
-    type: 'set_torque',
-    mode: modeCfg.id,
-    op_mode: modeCfg.opMode,
-    role: modeCfg.role,
-    torque_nm: next,
-    target_torque_ext: next,
-    delta,
-  }
-  const { sentLive } = sendEspCommand(payload)
-  $('espCommandStatus').textContent = sentLive
-    ? `Sent to ESP: ${next} N·m (${modeCfg.roleLabel})`
-    : `Target updated to ${next} N·m — ready to transmit to ESP`
-}
-
-function updateFromESP(packet) {
-  if (!packet || typeof packet !== 'object' || !state.active || state.paused || state.ended) return
-
-  const modeCfg = activeModeConfig()
-  const incomingTorque = modeCfg.role === 'support'
-    ? (packet.support_torque ?? packet.supportTorque ?? packet.torque ?? packet.knee_torque_nm ?? packet.target_curve_nm)
-    : (packet.resistance_torque ?? packet.resistanceTorque ?? packet.torque ?? packet.knee_torque_nm ?? packet.target_curve_nm)
-
-  if (incomingTorque !== undefined && Number.isFinite(Number(incomingTorque))) {
-    setLiveTorque(Math.abs(Number(incomingTorque)))
-  }
-
-  if (packet.reps_remaining !== undefined && Number.isFinite(Number(packet.reps_remaining))) {
-    const remaining = clamp(Math.round(Number(packet.reps_remaining)), 0, state.targetReps)
-    state.completedReps = state.targetReps - remaining
-    updateCountdownUI()
-  } else {
-    const repCount = packet.current_rep ?? packet.completed_reps ?? packet.completedReps ?? packet.rep_index ?? packet.rep
-    if (repCount !== undefined && Number.isFinite(Number(repCount))) {
-      state.completedReps = clamp(Math.round(Number(repCount)), 0, state.targetReps)
-      updateCountdownUI()
+    if (torqueMinusBtn) {
+      torqueMinusBtn.disabled = state.targetTorque <= mode.minTorque || state.estopped;
+    }
+    if (torquePlusBtn) {
+      torquePlusBtn.disabled = state.targetTorque >= mode.maxTorque || state.estopped;
     }
   }
-}
 
-function stopDemoTelemetry() {
-  if (simTimer !== null) {
-    clearInterval(simTimer)
-    simTimer = null
+  function renderRepPresets() {
+    if (!repPresets) return;
+    const mode = currentMode();
+    repPresets.innerHTML = "";
+    mode.repPresets.forEach((count) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `rep-preset-btn${count === state.targetReps ? " active" : ""}`;
+      btn.textContent = `${count} reps`;
+      btn.addEventListener("click", () => {
+        setTargetReps(count);
+      });
+      repPresets.appendChild(btn);
+    });
   }
-}
 
-function startDemoTelemetry() {
-  stopDemoTelemetry()
-  if (!state.active || state.wsConnected || !state.demoRunning || state.ended) return
-
-  simTimer = setInterval(() => {
-    if (!state.active || state.paused || state.estopped || state.ended || state.wsConnected || !state.demoRunning) return
-    const modeCfg = activeModeConfig()
-    const remaining = state.targetReps - state.completedReps
-    if (remaining <= 0) {
-      setLiveTorque(0)
-      return
+  function syncKinematicsInputs() {
+    const mode = currentMode();
+    const rMin = clamp(Math.round(Number(state.romWindowDeg[0]) || 0), 0, 170);
+    const rMax = clamp(Math.round(Number(state.romWindowDeg[1]) || 110), rMin + 10, 180);
+    state.romWindowDeg = [rMin, rMax];
+    if (romMinInput) romMinInput.value = String(rMin);
+    if (romMaxInput) romMaxInput.value = String(rMax);
+    if (activeRomMinInput) activeRomMinInput.value = String(rMin);
+    if (activeRomMaxInput) activeRomMaxInput.value = String(rMax);
+    if (activeSuggestedTag) {
+      const sourcePrefix = state.clinicalRx?.flexion ? "Clinical Rx" : "Therapist suggested";
+      activeSuggestedTag.textContent = `${sourcePrefix}: ${mode.suggestedReps} reps · ${rMin}°–${rMax}°`;
     }
-    const ripple = (Math.random() - 0.5) * (modeCfg.role === 'support' ? 1.4 : 2.6)
-    setLiveTorque(clamp(state.targetTorque + ripple, 0, modeCfg.maxTorque))
 
-    autoRepAccumulator += 300
-    if (autoRepAccumulator >= 3600) {
-      autoRepAccumulator = 0
-      state.completedReps = Math.min(state.targetReps, state.completedReps + 1)
-      updateCountdownUI()
-    }
-  }, 300)
-}
+    romPresetBtns.forEach((btn) => {
+      const pMin = Number(btn.getAttribute("data-rom-min"));
+      const pMax = Number(btn.getAttribute("data-rom-max"));
+      btn.classList.toggle("active", pMin === rMin && pMax === rMax);
+    });
 
-function closeEspSocket() {
-  if (socket) {
-    try { socket.close() } catch {}
-    socket = null
-  }
-  state.wsConnected = false
-}
-
-function connectEspSocket() {
-  closeEspSocket()
-  if (state.deviceMode !== 'connected' || !state.wsUrl) {
-    updateEspStatusPill()
-    startDemoTelemetry()
-    return
-  }
-
-  const { endpoint, usingBridge } = resolveEspSocketEndpoint()
-  if (!endpoint || !/^wss?:\/\//.test(endpoint)) {
-    updateEspStatusPill()
-    startDemoTelemetry()
-    return
-  }
-
-  try {
-    socket = new WebSocket(endpoint)
-    socket.addEventListener('open', () => {
-      if (!usingBridge) {
-        state.wsConnected = true
-        stopDemoTelemetry()
-        updateEspStatusPill()
-        sendEspCommand(buildStartSessionPayload())
+    if (velInputLabel && velUnitText) {
+      if (mode.key === "isometric") {
+        velInputLabel.textContent = "Isometric Lock Angle";
+        velUnitText.textContent = "Hold Angle (°)";
       } else {
-        updateEspStatusPill()
-        if (state.active && state.demoRunning && !state.ended && !state.wsConnected) {
-          startDemoTelemetry()
-        }
+        velInputLabel.textContent = "Target Angular Velocity";
+        velUnitText.textContent = "Speed (°/s)";
       }
-    })
-    socket.addEventListener('message', (event) => {
-      try {
-        const packet = JSON.parse(event.data)
-        if (!packet || typeof packet !== 'object') return
-
-        if (packet.type === 'esp_status') {
-          const connected = Boolean(packet.connected)
-          state.wsConnected = connected
-          if (connected) {
-            stopDemoTelemetry()
-            if (state.active && !state.ended) {
-              sendEspCommand(buildStartSessionPayload())
-              if (state.paused) sendEspCommand({ type: 'pause_session' })
-            }
-            if ($('espCommandStatus')) {
-              $('espCommandStatus').textContent = `ESP32 live · Target ${state.targetTorque} N·m`
-            }
-          } else {
-            if (state.active && state.demoRunning && !state.ended) startDemoTelemetry()
-            if ($('espCommandStatus') && packet.message) {
-              $('espCommandStatus').textContent = packet.message
-            }
-          }
-          updateEspStatusPill()
-          return
-        }
-
-        if (packet.type === 'esp_ack') {
-          if (packet.forwarded === false && $('espCommandStatus')) {
-            $('espCommandStatus').textContent = packet.message || 'ESP32 offline — command queued locally'
-          }
-          return
-        }
-
-        state.hadLiveEsp = true
-        if (!state.wsConnected) {
-          state.wsConnected = true
-          stopDemoTelemetry()
-          updateEspStatusPill()
-        }
-        updateFromESP(packet)
-      } catch (err) {
-        console.warn('Invalid ESP32 JSON packet', err)
-      }
-    })
-    socket.addEventListener('close', () => {
-      state.wsConnected = false
-      updateEspStatusPill()
-      if (state.active && state.demoRunning && !state.ended) startDemoTelemetry()
-    })
-    socket.addEventListener('error', () => {
-      state.wsConnected = false
-      updateEspStatusPill()
-    })
-  } catch {
-    state.wsConnected = false
-    updateEspStatusPill()
-    startDemoTelemetry()
-  }
-}
-
-async function saveSessionProgress(repsOverride) {
-  if (state.saving || state.saved) return
-  state.saving = true
-
-  const feedback = $('saveFeedback')
-  const textEl = $('saveFeedbackText')
-  const retryBtn = $('retrySaveBtn')
-  feedback.hidden = false
-  feedback.classList.remove('error')
-  textEl.textContent = 'Saving session to Track Progress…'
-  retryBtn.hidden = true
-
-  const modeCfg = activeModeConfig()
-  const activePausedMs = state.pausedMs + (state.paused && state.pausedAt ? Date.now() - state.pausedAt : 0)
-  const durationSeconds = Math.max(0, Math.round((Date.now() - state.startedAt - activePausedMs) / 1000))
-  const reps = clamp(Math.round(repsOverride ?? Math.max(1, state.completedReps || 1)), 1, 99)
-
-  try {
-    const res = await fetch('/api/progress', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({
-        type: modeCfg.progressType,
-        mode: modeCfg.name,
-        torqueNm: state.targetTorque,
-        reps,
-        durationSeconds,
-        source: (state.wsConnected || state.hadLiveEsp)
-          ? 'esp32'
-          : (state.deviceMode === 'demo' ? 'demo' : 'connected-preview'),
-      }),
-    })
-    const data = await res.json()
-    if (!res.ok || !data.ok) throw new Error(data.message || 'Could not save session.')
-    state.saved = true
-    textEl.textContent = `Saved ${modeCfg.progressType} (${modeCfg.shortName} · ${reps} reps) to Track Progress ✓`
-    if (data.session) {
-      state.sessions = [data.session, ...state.sessions.filter((item) => item.id !== data.session.id)]
-      renderHistory()
     }
-    void loadHistory()
-  } catch (error) {
-    feedback.classList.add('error')
-    textEl.textContent = `${error.message} Click Retry Save.`
-    retryBtn.hidden = false
-  } finally {
-    state.saving = false
+    if (targetVelInput) {
+      targetVelInput.value = String(Math.round(Number(state.targetVelDegS) || mode.defaultVel));
+    }
   }
-}
 
-function enterActiveSession() {
-  const modeCfg = activeModeConfig()
-  state.active = true
-  state.ended = false
-  state.saving = false
-  state.saved = false
-  state.completedReps = 0
-  state.paused = false
-  state.estopped = false
-  state.hadLiveEsp = false
-  state.startedAt = Date.now()
-  state.pausedAt = 0
-  state.pausedMs = 0
-  autoRepAccumulator = 0
-  state.visualTorque = 0
-  state.liveTorque = 0
+  function setTargetReps(nextReps) {
+    state.targetReps = clamp(Math.round(Number(nextReps) || 1), 1, 50);
+    if (repTargetDisplay) {
+      repTargetDisplay.textContent = String(state.targetReps);
+    }
+    renderRepPresets();
+    updateSetupSummary();
+  }
 
-  $('setupView').hidden = true
-  $('activeView').hidden = false
-  $('saveFeedback').hidden = true
+  function updateSetupSummary() {
+    const mode = currentMode();
+    if (suggestedModeName) {
+      suggestedModeName.textContent = mode.title;
+    }
+    if (suggestedRepCount) {
+      suggestedRepCount.textContent = `${mode.suggestedReps} reps`;
+    }
+    if (setupSummary) {
+      const rxNote = state.clinicalRx?.flexion
+        ? ` · Clinical target: <strong>${state.targetTorque} N·m</strong>`
+        : ` · Target: <strong>${state.targetTorque} N·m</strong>`;
+      const velDesc = mode.key === "isometric"
+        ? `Hold <strong>${Math.round(state.targetVelDegS)}°</strong>`
+        : `<strong>${Math.round(state.targetVelDegS)}°/s</strong>`;
+      setupSummary.innerHTML =
+        `Selected: <strong>${mode.title}</strong> (${mode.rolePillText}) · <strong>${state.targetReps} repetitions</strong> · ROM <strong>${state.romWindowDeg[0]}°–${state.romWindowDeg[1]}°</strong> · ${velDesc}${rxNote}`;
+    }
+  }
 
-  const rec = recommendedConfigForMode(modeCfg.id)
-  $('activeModePill').textContent = modeCfg.name
-  $('activeSuggestedTag').textContent = `${rec.isClinicalRec ? 'Clinically suggested' : 'Therapist suggested'}: ${rec.suggestedReps} reps`
-  $('torqueRoleEyebrow').textContent = modeCfg.eyebrow
-  $('torqueOdometerLabel').textContent = modeCfg.roleLabel
-  $('setpointLabel').textContent = modeCfg.setpointLabel
-  $('odoMaxLabel').textContent = String(modeCfg.maxTorque)
-  $('odoProgress').classList.toggle('support-arc', modeCfg.role === 'support')
-  const torqueRecEl = $('activeTorqueRec')
-  if (torqueRecEl) {
-    if (state.prescription?.flexion) {
-      const flx = state.prescription.flexion
-      torqueRecEl.hidden = false
-      torqueRecEl.textContent = `Clinical target (${state.prescription.protocolId}): ${flx.targetTorqueNm} N·m (${flx.torqueRangeNm}) · ROM ${flx.romWindowDeg[0]}°–${flx.romWindowDeg[1]}°`
+  function selectMode(modeKey, preserveClinicalTarget) {
+    if (!MODE_CATALOG[modeKey]) return;
+    state.modeKey = modeKey;
+    const mode = currentMode();
+
+    if (!preserveClinicalTarget) {
+      state.targetReps = mode.suggestedReps;
+      state.targetTorque = mode.defaultTarget;
+      state.targetVelDegS = mode.defaultVel;
     } else {
-      torqueRecEl.hidden = true
+      state.targetTorque = clamp(state.targetTorque, mode.minTorque, mode.maxTorque);
+    }
+
+    modeCards.forEach((card) => {
+      const isSelected = card.getAttribute("data-mode") === modeKey;
+      card.classList.toggle("selected", isSelected);
+      card.setAttribute("aria-checked", isSelected ? "true" : "false");
+    });
+
+    extraModePills.forEach((pill) => {
+      const isSelected = pill.getAttribute("data-mode") === modeKey;
+      pill.classList.toggle("active", isSelected);
+    });
+
+    if (repTargetDisplay) {
+      repTargetDisplay.textContent = String(state.targetReps);
+    }
+    renderRepPresets();
+    syncKinematicsInputs();
+    updateSetupSummary();
+    updateTargetTorqueUI();
+
+    if (state.espConnected) {
+      sendEspCommand(buildSetParamsPayload("select_mode"));
     }
   }
-  $('pauseSessionBtn').textContent = 'Pause Session'
-  $('pauseSessionBtn').disabled = false
-  $('endSessionBtn').disabled = false
-  $('autoSimToggleBtn').textContent = state.demoRunning ? 'Pause Auto Demo' : 'Resume Auto Demo'
 
-  paintTorqueOdometer(0)
-  updateCountdownUI()
-  updateTorqueControlsUI()
-
-  const { sentLive } = sendEspCommand(buildStartSessionPayload())
-  $('espCommandStatus').textContent = sentLive
-    ? `Session started on ESP · Target: ${state.targetTorque} N·m`
-    : `Initial target ${state.targetTorque} N·m — adjust with − / + to send to ESP`
-
-  connectEspSocket()
-}
-
-function endActiveSession() {
-  if (!state.active || state.ended) return
-  state.ended = true
-  if (!state.paused) {
-    state.paused = true
-    state.pausedAt = Date.now()
-  }
-  stopDemoTelemetry()
-  sendEspCommand({ type: 'stop_session' })
-  $('pauseSessionBtn').disabled = true
-  $('endSessionBtn').disabled = true
-  updateCountdownUI()
-  updateEspStatusPill()
-  void saveSessionProgress(Math.max(1, state.completedReps || 1))
-}
-
-function exitToSetup() {
-  if (state.active) {
-    sendEspCommand({ type: 'stop_session' })
-  }
-  state.active = false
-  state.ended = false
-  stopDemoTelemetry()
-  closeEspSocket()
-  $('activeView').hidden = true
-  $('setupView').hidden = false
-  updateSetupUI()
-}
-
-function togglePauseSession() {
-  if (state.ended) return
-  if (state.paused) {
-    if (state.pausedAt) state.pausedMs += Date.now() - state.pausedAt
-    state.pausedAt = 0
-    state.paused = false
-    $('pauseSessionBtn').textContent = 'Pause Session'
-    sendEspCommand({ type: 'resume_session' })
-    if (!state.wsConnected && state.demoRunning) startDemoTelemetry()
-  } else {
-    state.paused = true
-    state.pausedAt = Date.now()
-    $('pauseSessionBtn').textContent = 'Resume Session'
-    sendEspCommand({ type: 'pause_session' })
-  }
-  updateEspStatusPill()
-}
-
-function attachEvents() {
-  $('menuToggleBtn').addEventListener('click', () => {
-    const drawer = $('mobileNavDrawer')
-    const open = drawer.classList.toggle('open')
-    $('menuToggleBtn').setAttribute('aria-expanded', String(open))
-  })
-
-  document.querySelectorAll('.mode-card').forEach((card) => {
-    card.addEventListener('click', () => {
-      const modeId = card.dataset.mode
-      if (!MODES[modeId]) return
-      const rec = recommendedConfigForMode(modeId)
-      state.userEditedSetup = true
-      state.mode = modeId
-      state.targetReps = rec.suggestedReps
-      state.targetTorque = rec.targetTorque
-      updateSetupUI()
-    })
-  })
-
-  $('useSuggestedBtn').addEventListener('click', () => {
-    const rec = recommendedConfigForMode(state.mode)
-    state.targetReps = rec.suggestedReps
-    state.targetTorque = rec.targetTorque
-    updateSetupUI()
-  })
-
-  $('repMinusBtn').addEventListener('click', () => {
-    state.userEditedSetup = true
-    state.targetReps = clamp(state.targetReps - 1, MIN_REPS, MAX_REPS)
-    updateSetupUI()
-  })
-
-  $('repPlusBtn').addEventListener('click', () => {
-    state.userEditedSetup = true
-    state.targetReps = clamp(state.targetReps + 1, MIN_REPS, MAX_REPS)
-    updateSetupUI()
-  })
-
-  $('startWorkoutBtn').addEventListener('click', enterActiveSession)
-  $('backToSetupBtn').addEventListener('click', exitToSetup)
-  $('chooseAnotherModeBtn').addEventListener('click', exitToSetup)
-  $('endSessionBtn').addEventListener('click', endActiveSession)
-  $('retrySaveBtn').addEventListener('click', () => void saveSessionProgress(Math.max(1, state.completedReps || 1)))
-
-  $('repeatSessionBtn').addEventListener('click', () => {
-    state.ended = false
-    state.saved = false
-    state.saving = false
-    state.completedReps = 0
-    state.paused = false
-    state.estopped = false
-    state.hadLiveEsp = false
-    state.startedAt = Date.now()
-    state.pausedAt = 0
-    state.pausedMs = 0
-    autoRepAccumulator = 0
-    $('pauseSessionBtn').textContent = 'Pause Session'
-    $('pauseSessionBtn').disabled = false
-    $('endSessionBtn').disabled = false
-    $('saveFeedback').hidden = true
-    updateCountdownUI()
-    updateEspStatusPill()
-    const { sentLive } = sendEspCommand(buildStartSessionPayload())
-    $('espCommandStatus').textContent = sentLive
-      ? `Restarted on ESP · Target: ${state.targetTorque} N·m`
-      : `Target ${state.targetTorque} N·m — adjust with − / + to send to ESP`
-    if (!state.wsConnected && state.demoRunning) startDemoTelemetry()
-  })
-
-  $('torqueMinusBtn').addEventListener('click', () => adjustTorque(-activeModeConfig().stepTorque))
-  $('torquePlusBtn').addEventListener('click', () => adjustTorque(activeModeConfig().stepTorque))
-
-  $('pauseSessionBtn').addEventListener('click', togglePauseSession)
-
-  $('hardStopBtn').addEventListener('click', () => {
-    state.estopped = true
-    if (!state.paused) {
-      state.paused = true
-      state.pausedAt = Date.now()
-    }
-    $('pauseSessionBtn').textContent = 'Resume Session'
-    setLiveTorque(0)
-    sendEspCommand({ type: 'estop', estop_active: 1 })
-    updateEspStatusPill()
-    $('espCommandStatus').textContent = 'Hard Stop command sent to ESP.'
-  })
-
-  $('simRepBtn').addEventListener('click', () => {
-    if (state.ended || state.completedReps >= state.targetReps) return
-    state.completedReps += 1
-    updateCountdownUI()
-  })
-
-  $('autoSimToggleBtn').addEventListener('click', () => {
-    state.demoRunning = !state.demoRunning
-    $('autoSimToggleBtn').textContent = state.demoRunning ? 'Pause Auto Demo' : 'Resume Auto Demo'
-    if (state.demoRunning) startDemoTelemetry()
-    else stopDemoTelemetry()
-    updateEspStatusPill()
-  })
-}
-
-async function loadDeviceConfig() {
-  try {
-    const res = await fetch('/api/device/config', {
-      credentials: 'same-origin',
-      cache: 'no-store',
-    })
-    if (!res.ok) return
-    const data = await res.json()
-    if (data.ok) {
-      state.bypassEsp = Boolean(data.bypassEsp)
-      state.deviceMode = data.deviceMode === 'connected' ? 'connected' : 'demo'
-      state.wsUrl = data.wsUrl || ''
-      state.bridgeWsPath = data.bridgeWsPath || ''
-      state.prescription = data.prescription || null
-      state.clinicalIntake = data.clinicalIntake || null
-      renderClinicalFlexionCard()
-      if (state.prescription && !state.active) {
-        applyClinicalPrescription(state.prescription, { force: false })
+  function updateTopHubHardwareBar() {
+    if (thLinkChip) {
+      if (!state.espConnected) {
+        thLinkChip.textContent = "Master WS: Offline (Demo)";
+        thLinkChip.className = "clinical-flexion-chip";
+      } else if (state.u2Linked) {
+        thLinkChip.textContent = "Top-Hub U2: Linked (50 Hz)";
+        thLinkChip.className = "clinical-flexion-chip ok";
+      } else {
+        thLinkChip.textContent = "Top-Hub U2: Scanning ESP-NOW…";
+        thLinkChip.className = "clinical-flexion-chip warn";
       }
-      updateEspStatusPill()
     }
-  } catch {}
-}
 
-window.doulaFlexion = { updateFromESP }
+    if (thHomeChip) {
+      if (state.u2HardStop || state.estopped) {
+        thHomeChip.textContent = "Safety: HARD-STOP LOCKED";
+        thHomeChip.className = "clinical-flexion-chip warn";
+      } else if (state.u2Spasm) {
+        thHomeChip.textContent = "Safety: Spasm Guard Active";
+        thHomeChip.className = "clinical-flexion-chip warn";
+      } else if (state.u2BusyHoming) {
+        thHomeChip.textContent = "Home: Homing in progress…";
+        thHomeChip.className = "clinical-flexion-chip warn";
+      } else if (state.u2Homed) {
+        thHomeChip.textContent = "Home: Latch Ready (H:1)";
+        thHomeChip.className = "clinical-flexion-chip ok";
+      } else {
+        thHomeChip.textContent = "Home: Unhomed (H:0)";
+        thHomeChip.className = "clinical-flexion-chip";
+      }
+    }
 
-buildOdometerTicks()
-attachEvents()
-updateSetupUI()
-void loadDeviceConfig()
-void loadHistory()
+    if (thAngleChip) {
+      thAngleChip.textContent =
+        `Knee Angle θk: ${state.kneeAngleDeg.toFixed(1)}° (${state.kneeVelDegS >= 0 ? "+" : ""}${state.kneeVelDegS.toFixed(1)}°/s)`;
+    }
+
+    if (thPowerChip) {
+      thPowerChip.textContent = `Drive: ${state.vbusVolts.toFixed(1)} V · ${state.motorCurrentA.toFixed(2)} A`;
+    }
+
+    if (thWorkChip) {
+      thWorkChip.textContent = `Last Rep Work: ${state.lastRepWorkJ.toFixed(2)} J`;
+    }
+
+    if (thAngleBarFill) {
+      const span = Math.max(15, (state.romWindowDeg[1] || 110) - (state.romWindowDeg[0] || 0));
+      const pct = clamp(((state.kneeAngleDeg - (state.romWindowDeg[0] || 0)) / span) * 100, 0, 100);
+      thAngleBarFill.style.width = `${pct.toFixed(1)}%`;
+    }
+
+    if (hardStopBtn) {
+      const locked = state.estopped || state.u2HardStop;
+      hardStopBtn.textContent = locked ? "Release Hard Stop" : "Hard Stop";
+      hardStopBtn.classList.toggle("engaged", locked);
+    }
+  }
+
+  function updateCountdownUI() {
+    const remaining = Math.max(0, state.targetReps - state.completedReps);
+    const pct = state.targetReps > 0
+      ? clamp((state.completedReps / state.targetReps) * 100, 0, 100)
+      : 0;
+
+    if (repsRemainingValue) {
+      repsRemainingValue.textContent = String(remaining);
+      repsRemainingValue.classList.remove("bump");
+      void repsRemainingValue.offsetWidth;
+      repsRemainingValue.classList.add("bump");
+    }
+    if (repsRemainingCaption) {
+      repsRemainingCaption.textContent = remaining === 1 ? "rep remaining" : "reps remaining";
+    }
+    if (repsProgressText) {
+      repsProgressText.textContent = `${state.completedReps} / ${state.targetReps} completed`;
+    }
+    if (repProgressFill) {
+      repProgressFill.style.width = `${pct.toFixed(1)}%`;
+    }
+
+    const done = remaining === 0 && state.active;
+    if (sessionCompleteBanner) {
+      sessionCompleteBanner.hidden = !done && !state.ended;
+    }
+
+    if (done && !state.ended) {
+      state.ended = true;
+      if (bannerTitle) bannerTitle.textContent = "Session Complete";
+      if (bannerMessage) {
+        bannerMessage.textContent = `Completed ${state.completedReps} of ${state.targetReps} repetitions in ${currentMode().title}.`;
+      }
+      setOdometerValue(0);
+      sendEspCommand({ type: "stop_session", reason: "reps_complete" });
+      persistCompletedSession("completed");
+    }
+  }
+
+  function recordOneRep(sourceLabel) {
+    if (!state.active || state.paused || state.ended || state.estopped) return;
+    if (state.completedReps >= state.targetReps) return;
+
+    state.completedReps += 1;
+    updateCountdownUI();
+    if (espCommandStatus && sourceLabel) {
+      espCommandStatus.textContent = `${sourceLabel} (${state.completedReps}/${state.targetReps} reps)`;
+    }
+  }
+
+  function updateConnectionUI(isLive, customText) {
+    state.espConnected = Boolean(isLive);
+
+    if (connectionBadge) {
+      connectionBadge.className = `exercise-mode-indicator ${isLive ? "live" : "demo"}`;
+      connectionBadge.textContent = customText || (isLive ? "● LIVE — ESP32 CONNECTED" : "● DEMO — NO ESP32");
+    }
+    if (espStatusPill) {
+      espStatusPill.className = `pill-status ${isLive ? "live" : "demo"}`;
+      espStatusPill.textContent = isLive
+        ? (state.u2Linked ? "● Top-Hub U2 Linked" : "● Master Connected")
+        : "● Demo Simulator";
+    }
+    if (torqueSourceTag) {
+      torqueSourceTag.textContent = isLive
+        ? (state.u2Linked ? "Top-Hub 50 Hz Stream" : "Master ESP Stream")
+        : "Demo Telemetry";
+    }
+    if (repTestControls) {
+      repTestControls.hidden = Boolean(isLive && state.u2Linked);
+    }
+    updateTopHubHardwareBar();
+  }
+
+  function buildSetParamsPayload(reason) {
+    const mode = currentMode();
+    return {
+      type: "set_params",
+      reason: reason || "ui_sync",
+      mode: mode.key,
+      op_mode: mode.opMode,
+      role: mode.role,
+      torque_nm: state.targetTorque,
+      target_torque_ext: state.targetTorque,
+      target_torque_flex: Number((state.targetTorque * 0.65).toFixed(1)),
+      target_reps: state.targetReps,
+      rom_min_deg: state.romWindowDeg[0],
+      rom_max_deg: state.romWindowDeg[1],
+      target_vel_deg_s: state.targetVelDegS,
+      d_offset_m: state.dOffsetM,
+      L_leg_m: state.lLegM,
+      pathology_profile: state.pathologyCode
+    };
+  }
+
+  function sendEspCommand(payload) {
+    const message = JSON.stringify({
+      ...payload,
+      timestamp: Date.now()
+    });
+
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(message);
+      return true;
+    }
+    if (socket && socket.readyState === WebSocket.CONNECTING) {
+      pendingOpenCommands.push(message);
+      return true;
+    }
+    return false;
+  }
+
+  function adjustTargetTorque(deltaSteps) {
+    if (state.estopped) return;
+    const mode = currentMode();
+    const prev = state.targetTorque;
+    const next = clamp(prev + deltaSteps * mode.step, mode.minTorque, mode.maxTorque);
+    if (next === prev) return;
+
+    state.targetTorque = next;
+    state.lastLocalTorqueSetMs = Date.now();
+    updateTargetTorqueUI();
+    updateSetupSummary();
+
+    const sent = sendEspCommand({
+      type: "set_torque",
+      mode: mode.key,
+      op_mode: mode.opMode,
+      role: mode.role,
+      torque_nm: state.targetTorque,
+      target_torque_ext: state.targetTorque,
+      target_torque_flex: Number((state.targetTorque * 0.65).toFixed(1)),
+      rom_min_deg: state.romWindowDeg[0],
+      rom_max_deg: state.romWindowDeg[1],
+      target_vel_deg_s: state.targetVelDegS
+    });
+
+    if (espCommandStatus) {
+      espCommandStatus.textContent = sent
+        ? `Sent ${mode.role} target ${state.targetTorque} N·m to Top-Hub via Master ESP32.`
+        : `Set ${mode.role} target to ${state.targetTorque} N·m (Demo mode).`;
+    }
+  }
+
+  function applyKinematicsFromInputs(sendNow, useActiveInputs) {
+    const mode = currentMode();
+    const minEl = useActiveInputs && activeRomMinInput ? activeRomMinInput : romMinInput;
+    const maxEl = useActiveInputs && activeRomMaxInput ? activeRomMaxInput : romMaxInput;
+    const rawMin = minEl ? Number(minEl.value) : state.romWindowDeg[0];
+    const rawMax = maxEl ? Number(maxEl.value) : state.romWindowDeg[1];
+    const rawVel = targetVelInput ? Number(targetVelInput.value) : state.targetVelDegS;
+
+    const rMin = clamp(Number.isFinite(rawMin) ? Math.round(rawMin) : 0, 0, 170);
+    const rMax = clamp(Number.isFinite(rawMax) ? Math.round(rawMax) : 110, rMin + 10, 180);
+    const vel = clamp(Number.isFinite(rawVel) ? Math.round(rawVel) : mode.defaultVel, 5, 180);
+
+    state.romWindowDeg = [rMin, rMax];
+    state.targetVelDegS = vel;
+    state.lastLocalKinSetMs = Date.now();
+    syncKinematicsInputs();
+    updateSetupSummary();
+    updateTopHubHardwareBar();
+
+    if (sendNow) {
+      const sent = sendEspCommand(buildSetParamsPayload("kinematics_update"));
+      if (topHubStatusNote) {
+        topHubStatusNote.innerHTML = sent
+          ? `Synced ROM <strong>${rMin}°–${rMax}°</strong> &amp; speed <strong>${vel}°/s</strong> to Master ESP32 → Top-Hub U2.`
+          : `Updated ROM <strong>${rMin}°–${rMax}°</strong> &amp; speed <strong>${vel}°/s</strong> locally.`;
+      }
+      if (espCommandStatus && state.active) {
+        espCommandStatus.textContent = sent
+          ? `Updated live ROM to ${rMin}°–${rMax}° on Top-Hub U2.`
+          : `Updated ROM to ${rMin}°–${rMax}° (Demo mode).`;
+      }
+    }
+  }
+
+  function updateFromESP(packet) {
+    if (!packet || typeof packet !== "object") return;
+
+    if (packet.type === "status") {
+      if (packet.connected === false) {
+        updateConnectionUI(false, "● DEMO — ESP32 OFFLINE");
+        if (topHubStatusNote && packet.message) {
+          topHubStatusNote.textContent = packet.message;
+        }
+      } else if (packet.connected === true) {
+        updateConnectionUI(true, "● LIVE — ESP32 CONNECTED");
+      }
+      return;
+    }
+
+    if (packet.type === "esp_ack") {
+      const msg = packet.message || (packet.forwarded === false ? "ESP32 not connected." : "Command acknowledged by Master ESP32.");
+      if (topHubStatusNote) {
+        topHubStatusNote.textContent = msg;
+      }
+      if (espCommandStatus) {
+        espCommandStatus.textContent = msg;
+      }
+      if (packet.forwarded === false) {
+        updateConnectionUI(false, "● DEMO — ESP32 OFFLINE");
+      }
+      return;
+    }
+
+    // Always process hardware link & sensor telemetry even on Setup view or while paused
+    updateConnectionUI(true, state.u2Linked ? "● LIVE — TOP-HUB U2 LINKED" : "● LIVE — MASTER ESP32");
+
+    if (packet.u2_linked !== undefined) {
+      state.u2Linked = Number(packet.u2_linked) === 1;
+    }
+    if (packet.homed !== undefined) {
+      state.u2Homed = Number(packet.homed) === 1;
+    }
+    if (packet.calibrated !== undefined) {
+      state.u2Calibrated = Number(packet.calibrated) === 1;
+    }
+    if (packet.busy_homing !== undefined) {
+      state.u2BusyHoming = Number(packet.busy_homing) === 1;
+    }
+    if (packet.hardstop_locked !== undefined) {
+      state.u2HardStop = Number(packet.hardstop_locked) === 1;
+    }
+    if (packet.spasm !== undefined) {
+      state.u2Spasm = Number(packet.spasm) === 1;
+    }
+    if (Number.isFinite(Number(packet.knee_angle_deg))) {
+      state.kneeAngleDeg = Number(packet.knee_angle_deg);
+    }
+    if (Number.isFinite(Number(packet.knee_vel_deg_s))) {
+      state.kneeVelDegS = Number(packet.knee_vel_deg_s);
+    }
+    if (Number.isFinite(Number(packet.vbus_v))) {
+      state.vbusVolts = Number(packet.vbus_v);
+    }
+    if (Number.isFinite(Number(packet.motor_current_a))) {
+      state.motorCurrentA = Number(packet.motor_current_a);
+    }
+    if (Number.isFinite(Number(packet.last_rep_work_j))) {
+      state.lastRepWorkJ = Number(packet.last_rep_work_j);
+    }
+
+    const nowMs = Date.now();
+    if (nowMs - state.lastLocalKinSetMs > 1200) {
+      let kinUpdated = false;
+      if (Number.isFinite(Number(packet.rom_min_deg)) && Number.isFinite(Number(packet.rom_max_deg))) {
+        const pMin = Math.round(Number(packet.rom_min_deg));
+        const pMax = Math.round(Number(packet.rom_max_deg));
+        if (pMax > pMin + 5 && (pMin !== state.romWindowDeg[0] || pMax !== state.romWindowDeg[1])) {
+          state.romWindowDeg = [pMin, pMax];
+          kinUpdated = true;
+        }
+      }
+      if (Number.isFinite(Number(packet.target_vel_deg_s)) && Number(packet.target_vel_deg_s) > 0) {
+        const pVel = Math.round(Number(packet.target_vel_deg_s));
+        if (pVel !== Math.round(state.targetVelDegS)) {
+          state.targetVelDegS = pVel;
+          kinUpdated = true;
+        }
+      }
+      if (kinUpdated) {
+        syncKinematicsInputs();
+        updateSetupSummary();
+      }
+    }
+
+    if (packet.estop !== undefined) {
+      const nextEstop = Boolean(Number(packet.estop));
+      if (nextEstop && !state.estopped) {
+        state.estopped = true;
+        state.paused = true;
+        setOdometerValue(0);
+        if (espCommandStatus) {
+          espCommandStatus.textContent = "HARD STOP engaged on Top-Hub. Click Release Hard Stop or Resume Session to unlock.";
+        }
+      } else if (!nextEstop && state.estopped) {
+        state.estopped = false;
+        if (espCommandStatus) {
+          espCommandStatus.textContent = "Hard Stop released — Top-Hub unlocked.";
+        }
+      }
+    }
+
+    updateTopHubHardwareBar();
+
+    if (!state.active || state.ended) return;
+
+    const mode = currentMode();
+    let incomingTorque = null;
+    if (mode.role === "support" && Number.isFinite(Number(packet.support_torque))) {
+      incomingTorque = Number(packet.support_torque);
+    } else if (mode.role === "resistance" && Number.isFinite(Number(packet.resistance_torque))) {
+      incomingTorque = Number(packet.resistance_torque);
+    } else if (Number.isFinite(Number(packet.torque))) {
+      incomingTorque = Number(packet.torque);
+    }
+
+    if (incomingTorque !== null) {
+      setOdometerValue(incomingTorque);
+    }
+
+    if (Number.isFinite(Number(packet.target_torque)) && (nowMs - state.lastLocalTorqueSetMs > 900)) {
+      state.targetTorque = clamp(Math.round(Number(packet.target_torque)), mode.minTorque, mode.maxTorque);
+      updateTargetTorqueUI();
+    }
+
+    if (!state.paused && !state.estopped) {
+      if (Number.isFinite(Number(packet.completed_reps))) {
+        const nextCompleted = clamp(Math.round(Number(packet.completed_reps)), 0, state.targetReps);
+        if (nextCompleted !== state.completedReps) {
+          state.completedReps = nextCompleted;
+          updateCountdownUI();
+        }
+      } else if (Number.isFinite(Number(packet.reps_remaining))) {
+        const rem = clamp(Math.round(Number(packet.reps_remaining)), 0, state.targetReps);
+        state.completedReps = state.targetReps - rem;
+        updateCountdownUI();
+      } else if (packet.rep_completed === true || packet.event === "rep") {
+        recordOneRep("ESP rep sensor triggered");
+      }
+    }
+  }
+
+  window.updateFromESP = updateFromESP;
+
+  function resolveWsUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const espParam = params.get("esp");
+    if (espParam) {
+      return espParam.startsWith("ws://") || espParam.startsWith("wss://")
+        ? espParam
+        : `ws://${espParam}/`;
+    }
+    if (state.wsUrl) {
+      return state.wsUrl;
+    }
+    if (window.location.host) {
+      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+      return `${proto}//${window.location.host}/ws/device`;
+    }
+    return null;
+  }
+
+  function connectEspSocket() {
+    const url = resolveWsUrl();
+    if (!url) {
+      updateConnectionUI(false);
+      return;
+    }
+
+    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
+    clearTimeout(reconnectTimer);
+    try {
+      socket = new WebSocket(url);
+    } catch (_err) {
+      updateConnectionUI(false);
+      return;
+    }
+
+    socket.onopen = () => {
+      updateConnectionUI(true);
+      while (pendingOpenCommands.length > 0) {
+        const nextMsg = pendingOpenCommands.shift();
+        socket.send(nextMsg);
+      }
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const packet = JSON.parse(event.data);
+        updateFromESP(packet);
+      } catch (_err) {
+        // Ignore non-JSON frames
+      }
+    };
+
+    socket.onerror = () => {
+      // Handled in onclose
+    };
+
+    socket.onclose = () => {
+      updateConnectionUI(false);
+      reconnectTimer = setTimeout(connectEspSocket, 3500);
+    };
+  }
+
+  function startDemoLoop() {
+    clearInterval(simTimer);
+    const tickMs = 120;
+
+    simTimer = setInterval(() => {
+      if (!state.active || state.paused || state.ended || state.estopped) return;
+      if (state.espConnected && state.u2Linked) return;
+
+      const mode = currentMode();
+      state.simPhase += 0.24;
+
+      const wave = Math.sin(state.simPhase) * mode.simAmplitude;
+      const secondary = Math.cos(state.simPhase * 0.5) * (mode.simAmplitude * 0.45);
+      const simulatedTorque = clamp(
+        state.targetTorque + wave + secondary,
+        mode.minTorque * 0.6,
+        mode.maxTorque
+      );
+      setOdometerValue(simulatedTorque);
+
+      const span = Math.max(15, state.romWindowDeg[1] - state.romWindowDeg[0]);
+      const norm = 0.5 * (1 - Math.cos(state.simPhase));
+      state.kneeAngleDeg = state.romWindowDeg[0] + span * norm;
+      state.kneeVelDegS = Math.sin(state.simPhase) * state.targetVelDegS * 0.6;
+      updateTopHubHardwareBar();
+
+      if (state.autoSim && !state.espConnected) {
+        state.simRepElapsedMs += tickMs;
+        if (state.simRepElapsedMs >= 3600) {
+          state.simRepElapsedMs = 0;
+          recordOneRep("Auto demo rep completed");
+        }
+      }
+    }, tickMs);
+  }
+
+  function buildStartSessionPayload() {
+    const mode = currentMode();
+    return {
+      type: "start_session",
+      mode: mode.key,
+      op_mode: mode.opMode,
+      role: mode.role,
+      target_reps: state.targetReps,
+      torque_nm: state.targetTorque,
+      target_torque_ext: state.targetTorque,
+      target_torque_flex: Number((state.targetTorque * 0.65).toFixed(1)),
+      rom_min_deg: state.romWindowDeg[0],
+      rom_max_deg: state.romWindowDeg[1],
+      target_vel_deg_s: state.targetVelDegS,
+      d_offset_m: state.dOffsetM,
+      L_leg_m: state.lLegM,
+      pathology_profile: state.pathologyCode
+    };
+  }
+
+  function startSession() {
+    const mode = currentMode();
+    state.active = true;
+    state.paused = false;
+    state.ended = false;
+    state.estopped = false;
+    state.completedReps = 0;
+    state.peakTorque = 0;
+    state.torqueSum = 0;
+    state.torqueSamples = 0;
+    state.startedAtMs = Date.now();
+    state.simPhase = 0;
+    state.simRepElapsedMs = 0;
+    state.sessionSaved = false;
+    state.savingSession = false;
+    state.lastSavePayload = null;
+
+    if (saveFeedback) saveFeedback.hidden = true;
+    if (setupView) setupView.hidden = true;
+    if (activeView) activeView.hidden = false;
+
+    if (activeModePill) {
+      activeModePill.textContent = mode.clinicalLabel;
+    }
+    if (activeSuggestedTag) {
+      const sourcePrefix = state.clinicalRx?.flexion ? "Clinical Rx" : "Therapist suggested";
+      activeSuggestedTag.textContent = `${sourcePrefix}: ${mode.suggestedReps} reps · ${state.romWindowDeg[0]}°–${state.romWindowDeg[1]}°`;
+    }
+    if (torqueRoleEyebrow) {
+      torqueRoleEyebrow.textContent = mode.odometerTitle;
+    }
+    if (torqueOdometerLabel) {
+      torqueOdometerLabel.textContent = mode.odometerSubLabel;
+    }
+    if (setpointLabel) {
+      setpointLabel.textContent = mode.setpointLabel;
+    }
+    if (pauseSessionBtn) {
+      pauseSessionBtn.textContent = "Pause Session";
+    }
+    if (espCommandStatus) {
+      espCommandStatus.textContent = `Active ${mode.title}: ${mode.role} target ${state.targetTorque} N·m (${state.romWindowDeg[0]}°–${state.romWindowDeg[1]}°).`;
+    }
+    if (activeTorqueRec) {
+      if (state.clinicalRx?.flexion) {
+        const fx = state.clinicalRx.flexion;
+        activeTorqueRec.hidden = false;
+        activeTorqueRec.textContent = `Recommended for your intake (${state.clinicalRx.phase}): ${fx.targetTorqueNm} N·m · ROM ${fx.romWindowDeg[0]}°–${fx.romWindowDeg[1]}°`;
+      } else {
+        activeTorqueRec.hidden = true;
+      }
+    }
+
+    updateTargetTorqueUI();
+    updateCountdownUI();
+    setOdometerValue(mode.defaultTarget * 0.45);
+    updateTopHubHardwareBar();
+
+    connectEspSocket();
+    sendEspCommand(buildStartSessionPayload());
+    startDemoLoop();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function exitToSetup() {
+    if (state.active && !state.sessionSaved && state.completedReps > 0) {
+      persistCompletedSession("ended_early");
+    }
+    state.active = false;
+    state.paused = false;
+    state.ended = false;
+    clearInterval(simTimer);
+    sendEspCommand({ type: "stop_session", reason: "return_to_setup" });
+
+    if (activeView) activeView.hidden = true;
+    if (setupView) setupView.hidden = false;
+    updateTopHubHardwareBar();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function showSaveFeedback(message, isError) {
+    if (!saveFeedback || !saveFeedbackText) return;
+    saveFeedback.hidden = false;
+    saveFeedback.className = `save-feedback${isError ? " error" : ""}`;
+    saveFeedbackText.textContent = message;
+    if (retrySaveBtn) {
+      retrySaveBtn.hidden = !isError;
+    }
+  }
+
+  async function persistCompletedSession(outcome) {
+    if (state.sessionSaved || state.savingSession) return;
+    const mode = currentMode();
+    const durationSec = state.startedAtMs > 0
+      ? Math.max(1, Math.round((Date.now() - state.startedAtMs) / 1000))
+      : 0;
+    const avgTorqueNm = state.torqueSamples > 0
+      ? Number((state.torqueSum / state.torqueSamples).toFixed(1))
+      : state.targetTorque;
+    const peakTorqueNm = Number(Math.max(state.peakTorque, state.targetTorque).toFixed(1));
+
+    const payload = state.lastSavePayload || {
+      type: "flexion",
+      mode: mode.key,
+      modeTitle: mode.title,
+      role: mode.role,
+      completedReps: state.completedReps,
+      targetReps: state.targetReps,
+      targetTorqueNm: state.targetTorque,
+      avgTorqueNm,
+      peakTorqueNm,
+      durationSec,
+      romMinDeg: state.romWindowDeg[0],
+      romMaxDeg: state.romWindowDeg[1],
+      outcome: outcome || "completed"
+    };
+    state.lastSavePayload = payload;
+    state.savingSession = true;
+
+    try {
+      const res = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      state.sessionSaved = true;
+      state.savingSession = false;
+      showSaveFeedback(
+        `Saved to your progress record: ${mode.title} · ${state.completedReps}/${state.targetReps} reps · Avg ${avgTorqueNm} N·m (Peak ${peakTorqueNm} N·m).`,
+        false
+      );
+      await loadExerciseHistory();
+    } catch (_err) {
+      state.savingSession = false;
+      showSaveFeedback(
+        "Session finished, but saving to server failed. Click Retry Save to record it.",
+        true
+      );
+    }
+  }
+
+  function applyClinicalPrescription(rx) {
+    if (!rx || !rx.flexion) return;
+    state.clinicalRx = rx;
+    const fx = rx.flexion;
+
+    if (Array.isArray(fx.romWindowDeg) && fx.romWindowDeg.length === 2) {
+      state.romWindowDeg = [Number(fx.romWindowDeg[0]) || 0, Number(fx.romWindowDeg[1]) || 110];
+    }
+    if (Number.isFinite(Number(fx.targetVelDegS)) && Number(fx.targetVelDegS) > 0) {
+      state.targetVelDegS = Number(fx.targetVelDegS);
+    }
+    if (Number.isFinite(Number(fx.dOffsetM)) && Number(fx.dOffsetM) > 0) {
+      state.dOffsetM = Number(fx.dOffsetM);
+    }
+    if (Number.isFinite(Number(fx.lLegM)) && Number(fx.lLegM) >= 0.15) {
+      state.lLegM = Number(fx.lLegM);
+    }
+    if (Number.isFinite(Number(fx.pathologyCode))) {
+      state.pathologyCode = Number(fx.pathologyCode);
+    }
+
+    if (MODE_CATALOG[fx.recommendedMode]) {
+      const recMode = MODE_CATALOG[fx.recommendedMode];
+      recMode.suggestedReps = clamp(Number(fx.suggestedReps) || recMode.suggestedReps, 1, 50);
+      recMode.defaultTarget = clamp(Number(fx.targetTorqueNm) || recMode.defaultTarget, recMode.minTorque, recMode.maxTorque);
+    }
+
+    document.querySelectorAll("[data-rec-badge]").forEach((badge) => {
+      const key = badge.getAttribute("data-rec-badge");
+      badge.hidden = key !== fx.recommendedMode;
+    });
+
+    if (suggestionSourceLabel) {
+      suggestionSourceLabel.textContent = "Clinical Intake Rx";
+    }
+
+    if (clinicalFlexionCard) {
+      clinicalFlexionCard.hidden = false;
+      const safetyNote = Array.isArray(rx.safetyLocks) && rx.safetyLocks.length
+        ? rx.safetyLocks[0]
+        : "";
+      clinicalFlexionCard.innerHTML = `
+        <div class="clinical-flexion-top">
+          <div>
+            <span class="clinical-flexion-eyebrow">${escapeHtml(rx.phase)} · Automated Decision Tree</span>
+            <h2>Recommended: ${escapeHtml(fx.clinicalLabel)}</h2>
+          </div>
+          <a class="mini-pill-btn" href="/intake">Edit Clinical Intake</a>
+        </div>
+        <p class="clinical-flexion-summary">${escapeHtml(fx.rationale)}</p>
+        <div class="clinical-flexion-grid">
+          <span class="clinical-flexion-chip">Mode: ${escapeHtml(fx.modeName)}</span>
+          <span class="clinical-flexion-chip">Target Torque: ${Number(fx.targetTorqueNm)} N·m (${escapeHtml(fx.roleLabel)})</span>
+          <span class="clinical-flexion-chip">Repetitions: ${Number(fx.suggestedReps)} reps</span>
+          <span class="clinical-flexion-chip">ROM: ${Number(fx.romWindowDeg[0])}°–${Number(fx.romWindowDeg[1])}° · ${escapeHtml(fx.speedSpec)}</span>
+          ${safetyNote ? `<span class="clinical-flexion-chip warn">${escapeHtml(safetyNote)}</span>` : ""}
+        </div>
+      `;
+    }
+
+    if (MODE_CATALOG[fx.recommendedMode]) {
+      state.targetReps = MODE_CATALOG[fx.recommendedMode].suggestedReps;
+      state.targetTorque = MODE_CATALOG[fx.recommendedMode].defaultTarget;
+      selectMode(fx.recommendedMode, true);
+    }
+  }
+
+  async function loadDeviceConfig() {
+    try {
+      const [cfgRes, meRes] = await Promise.all([
+        fetch("/api/device/config"),
+        fetch("/api/me")
+      ]);
+      if (cfgRes.ok) {
+        const cfg = await cfgRes.json();
+        if (cfg.wsProxyPath && window.location.host) {
+          const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+          state.wsUrl = `${proto}//${window.location.host}${cfg.wsProxyPath}`;
+        }
+        if (cfg.connected) {
+          updateConnectionUI(true);
+        }
+      }
+      if (meRes.ok) {
+        const me = await meRes.json();
+        if (me?.user?.prescription) {
+          applyClinicalPrescription(me.user.prescription);
+        }
+      }
+    } catch (_err) {
+      // Static file fallback
+    }
+    connectEspSocket();
+  }
+
+  async function loadExerciseHistory() {
+    if (!historyList) return;
+    try {
+      const res = await fetch("/api/dashboard");
+      if (!res.ok) throw new Error("Unauthenticated or offline");
+      const data = await res.json();
+      const history = Array.isArray(data.exerciseHistory) ? data.exerciseHistory : [];
+      if (!history.length) {
+        historyList.innerHTML = `<div class="exercise-history-empty">No exercises recorded yet. Complete a session above to log your progress.</div>`;
+        return;
+      }
+      historyList.innerHTML = history.slice(0, 6).map((item) => `
+        <div class="exercise-history-row">
+          <div>
+            <strong>${escapeHtml(item.type)}</strong>
+            <div class="exercise-history-meta">${escapeHtml(item.date)}</div>
+          </div>
+          <div class="exercise-history-stats">
+            <span class="exercise-stat-pill">${escapeHtml(item.duration)}</span>
+            <span class="exercise-stat-pill">${escapeHtml(item.Highlight)}</span>
+          </div>
+        </div>
+      `).join("");
+    } catch (_err) {
+      historyList.innerHTML = `
+        <div class="exercise-history-row">
+          <div>
+            <strong>Flexion &amp; Extension (Isotonic)</strong>
+            <div class="exercise-history-meta">Recent clinical benchmark</div>
+          </div>
+          <div class="exercise-history-stats">
+            <span class="exercise-stat-pill">12/12 reps</span>
+            <span class="exercise-stat-pill">25 N·m target</span>
+          </div>
+        </div>
+      `;
+    }
+  }
+
+  // Event Listeners
+  if (menuToggleBtn && mobileNavDrawer) {
+    menuToggleBtn.addEventListener("click", () => {
+      const isOpen = mobileNavDrawer.classList.toggle("open");
+      menuToggleBtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    });
+  }
+
+  if (quickHomeBtn) {
+    quickHomeBtn.addEventListener("click", () => {
+      connectEspSocket();
+      const sent = sendEspCommand({ type: "setup_home" });
+      if (topHubStatusNote) {
+        topHubStatusNote.innerHTML = sent
+          ? "Sent <strong>Set 0° Home</strong> (<code>OP_SETUP_QUICK_6S</code>) to Master ESP32 → latching 0.0° &amp; ACS712 zero on Top-Hub U2…"
+          : "Demo mode: simulated Top-Hub 0.0° Home latch (H:1).";
+      }
+      if (!sent) {
+        state.u2Homed = true;
+        state.kneeAngleDeg = 0;
+        updateTopHubHardwareBar();
+      }
+    });
+  }
+
+  if (autoHomeBtn) {
+    autoHomeBtn.addEventListener("click", () => {
+      connectEspSocket();
+      const sent = sendEspCommand({ type: "setup_full" });
+      if (topHubStatusNote) {
+        topHubStatusNote.innerHTML = sent
+          ? "Sent <strong>Auto-Home (STOP1)</strong> (<code>OP_SETUP_FULL_25S</code>) to Master ESP32 → seeking extension stop on Top-Hub U2…"
+          : "Demo mode: simulated Top-Hub motorized Auto-Home (H:1).";
+      }
+      if (!sent) {
+        state.u2Homed = true;
+        state.kneeAngleDeg = 0;
+        updateTopHubHardwareBar();
+      }
+    });
+  }
+
+  if (releaseLockBtn) {
+    releaseLockBtn.addEventListener("click", () => {
+      connectEspSocket();
+      state.estopped = false;
+      state.u2HardStop = false;
+      state.u2Spasm = false;
+      const sent = sendEspCommand({ type: "hardstop_release" });
+      updateTargetTorqueUI();
+      updateTopHubHardwareBar();
+      if (topHubStatusNote) {
+        topHubStatusNote.textContent = sent
+          ? "Sent Hard-Stop Release (ESTOP_HARD_STOP_RELEASE) to Master ESP32 → Top-Hub U2 unlocked."
+          : "Cleared Hard-Stop lock state locally.";
+      }
+    });
+  }
+
+  modeCards.forEach((card) => {
+    card.addEventListener("click", () => {
+      const modeKey = card.getAttribute("data-mode");
+      selectMode(modeKey);
+    });
+  });
+
+  extraModePills.forEach((pill) => {
+    pill.addEventListener("click", () => {
+      const modeKey = pill.getAttribute("data-mode");
+      selectMode(modeKey);
+    });
+  });
+
+  romPresetBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const rMin = Number(btn.getAttribute("data-rom-min")) || 0;
+      const rMax = Number(btn.getAttribute("data-rom-max")) || 110;
+      if (romMinInput) romMinInput.value = String(rMin);
+      if (romMaxInput) romMaxInput.value = String(rMax);
+      applyKinematicsFromInputs(true);
+    });
+  });
+
+  if (romMinInput) {
+    romMinInput.addEventListener("change", () => applyKinematicsFromInputs(true, false));
+  }
+  if (romMaxInput) {
+    romMaxInput.addEventListener("change", () => applyKinematicsFromInputs(true, false));
+  }
+  if (activeRomMinInput) {
+    activeRomMinInput.addEventListener("change", () => applyKinematicsFromInputs(true, true));
+  }
+  if (activeRomMaxInput) {
+    activeRomMaxInput.addEventListener("change", () => applyKinematicsFromInputs(true, true));
+  }
+  if (applyActiveRomBtn) {
+    applyActiveRomBtn.addEventListener("click", () => applyKinematicsFromInputs(true, true));
+  }
+  if (targetVelInput) {
+    targetVelInput.addEventListener("change", () => applyKinematicsFromInputs(true, false));
+  }
+  if (applyKinematicsBtn) {
+    applyKinematicsBtn.addEventListener("click", () => applyKinematicsFromInputs(true, false));
+  }
+
+  if (useSuggestedBtn) {
+    useSuggestedBtn.addEventListener("click", () => {
+      setTargetReps(currentMode().suggestedReps);
+    });
+  }
+
+  if (repMinusBtn) {
+    repMinusBtn.addEventListener("click", () => {
+      setTargetReps(state.targetReps - 1);
+    });
+  }
+
+  if (repPlusBtn) {
+    repPlusBtn.addEventListener("click", () => {
+      setTargetReps(state.targetReps + 1);
+    });
+  }
+
+  if (startWorkoutBtn) {
+    startWorkoutBtn.addEventListener("click", startSession);
+  }
+
+  if (backToSetupBtn) {
+    backToSetupBtn.addEventListener("click", exitToSetup);
+  }
+
+  if (chooseAnotherModeBtn) {
+    chooseAnotherModeBtn.addEventListener("click", exitToSetup);
+  }
+
+  if (repeatSessionBtn) {
+    repeatSessionBtn.addEventListener("click", startSession);
+  }
+
+  if (retrySaveBtn) {
+    retrySaveBtn.addEventListener("click", () => {
+      persistCompletedSession("completed");
+    });
+  }
+
+  if (torqueMinusBtn) {
+    torqueMinusBtn.addEventListener("click", () => adjustTargetTorque(-1));
+  }
+
+  if (torquePlusBtn) {
+    torquePlusBtn.addEventListener("click", () => adjustTargetTorque(1));
+  }
+
+  if (simRepBtn) {
+    simRepBtn.addEventListener("click", () => {
+      recordOneRep("Manual test rep logged");
+    });
+  }
+
+  if (autoSimToggleBtn) {
+    autoSimToggleBtn.addEventListener("click", () => {
+      state.autoSim = !state.autoSim;
+      autoSimToggleBtn.textContent = state.autoSim ? "Pause Auto Demo" : "Resume Auto Demo";
+    });
+  }
+
+  if (pauseSessionBtn) {
+    pauseSessionBtn.addEventListener("click", () => {
+      if (!state.active || state.ended) return;
+      if (state.estopped) {
+        state.estopped = false;
+        state.u2HardStop = false;
+        state.paused = false;
+        pauseSessionBtn.textContent = "Pause Session";
+        sendEspCommand({ type: "resume_session" });
+        updateTargetTorqueUI();
+        updateTopHubHardwareBar();
+        if (espCommandStatus) {
+          espCommandStatus.textContent = "Hard Stop released & session resumed.";
+        }
+        return;
+      }
+      state.paused = !state.paused;
+      pauseSessionBtn.textContent = state.paused ? "Resume Session" : "Pause Session";
+      sendEspCommand({
+        type: state.paused ? "pause_session" : "resume_session"
+      });
+      if (espCommandStatus) {
+        espCommandStatus.textContent = state.paused ? "Session paused." : "Session resumed.";
+      }
+    });
+  }
+
+  if (endSessionBtn) {
+    endSessionBtn.addEventListener("click", exitToSetup);
+  }
+
+  if (hardStopBtn) {
+    hardStopBtn.addEventListener("click", () => {
+      if (state.estopped || state.u2HardStop) {
+        state.estopped = false;
+        state.u2HardStop = false;
+        sendEspCommand({ type: "hardstop_release" });
+        updateTargetTorqueUI();
+        updateTopHubHardwareBar();
+        if (espCommandStatus) {
+          espCommandStatus.textContent = "Hard Stop released — click Resume Session to continue.";
+        }
+        return;
+      }
+      state.estopped = true;
+      state.paused = true;
+      setOdometerValue(0);
+      updateTargetTorqueUI();
+      updateTopHubHardwareBar();
+      if (pauseSessionBtn) {
+        pauseSessionBtn.textContent = "Resume Session";
+      }
+      sendEspCommand({ type: "estop", estop_active: 1 });
+      if (espCommandStatus) {
+        espCommandStatus.textContent = "HARD STOP engaged — motor torque set to 0 N·m. Click Release Hard Stop or Resume Session to unlock.";
+      }
+    });
+  }
+
+  // Initialize UI
+  buildOdometerTicks();
+  selectMode("isotonic");
+  updateConnectionUI(false);
+  updateTopHubHardwareBar();
+  loadDeviceConfig();
+  loadExerciseHistory();
+})();
