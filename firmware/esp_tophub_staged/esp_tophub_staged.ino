@@ -13,8 +13,8 @@
 //   - Full clinical suite: 'autohome', 'goto', 'cpm', 'assist', 'iso', 'isok',
 //     'isom', pathology shear profiles ('path'), itemized spasm/clonus/OV safety,
 //     compliant electronic hard-stop ('lock' / 'release'), & full [REP] metrics.
-//   - Wi-Fi Channel 1 ESP-NOW link to U1 (ESP_MASTER): 50 Hz binary telemetry,
-//     event-driven rep summaries, <3 ms E-Stop, and 500 ms heartbeat watchdog.
+//   - Wi-Fi Channel 1..13 Auto-Sync ESP-NOW link to U1 (ESP_MASTER): 50 Hz
+//     binary telemetry, event-driven rep summaries, <3 ms E-Stop, and 500 ms watchdog.
 //   - Brake chopper defaults to CHOP_OFF (pending 5V NPN U202 driver) with
 //     27.5 V CHOP_OFF / 28.8 V hard overvoltage protection.
 //
@@ -106,7 +106,7 @@ static const float    VBUS_ABS_OV_FAULT_V   = 28.8f;   // Unconditional HW OV fa
 
 // Stage 6/7 ROM, Self-Homing, CPM, Clinical & Safety Constants
 static const float    ROM_ABS_MIN_DEG        = 0.0f;
-static const float    ROM_ABS_MAX_DEG        = 120.0f;
+static const float    ROM_ABS_MAX_DEG        = 180.0f;
 static const float    ROM_MIN_SPAN_DEG       = 10.0f;
 static const float    DEFAULT_ROM_MIN_DEG    = 5.0f;    // Safe extension limit off STOP1
 static const float    DEFAULT_ROM_MAX_DEG    = 90.0f;   // Default flexion limit
@@ -369,20 +369,23 @@ static float         g_safety_trip_f_n      = 0.0f;
 static float         g_safety_trip_i_a      = 0.0f;
 static float         g_safety_trip_mv       = 0.0f;
 
-// Wi-Fi + ESP-NOW Link State (U2 <-> U1: ESP_MASTER on Channel 1)
+// Wi-Fi + ESP-NOW Link State (U2 <-> U1: ESP_MASTER with Channel 1..13 Auto-Sync)
 static bool          g_wifi_enabled         = true;
 static uint8_t       g_wifi_channel         = REHAB_WIFI_CHANNEL;
 static bool          g_espnow_ready         = false;
 static uint8_t       g_master_mac[6]        = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 static bool          g_master_linked        = false;
 static uint32_t      g_master_last_rx_ms    = 0;
+static uint32_t      g_last_channel_hop_ms  = 0;
+static const uint32_t ESPNOW_CHANNEL_HOP_MS  = 180U;
+static const uint32_t ESPNOW_LINK_TIMEOUT_MS = 4000U;
 static bool          g_ctrl_from_espnow     = false;
 static uint16_t      g_telem_seq            = 0;
 static uint32_t      g_espnow_tx_ok         = 0;
 static uint32_t      g_espnow_tx_err        = 0;
 static uint32_t      g_espnow_rx_ok         = 0;
 static uint32_t      g_espnow_rx_bad        = 0;
-static uint8_t       g_espnow_evt_code      = 0; // 1=master_linked, 2=unhomed_reject
+static uint8_t       g_espnow_evt_code      = 0; // 1=master_linked, 2=unhomed_reject, 3=master_lost
 static portMUX_TYPE  g_rx_mux               = portMUX_INITIALIZER_UNLOCKED;
 static RehabCommandPacket_t g_rx_staging_pkt = {};
 static volatile bool g_rx_pkt_pending       = false;
@@ -1606,13 +1609,20 @@ static bool registerEspNowPeer(const uint8_t *mac_addr) {
 }
 
 static void handleRawEspNowPacket(const uint8_t *src_mac, const uint8_t *data, int len) {
-    if (data == nullptr || len != (int)sizeof(RehabCommandPacket_t)) {
+    if (data == nullptr || len < 1) {
+        g_espnow_rx_bad++;
+        return;
+    }
+    if (data[0] != PKT_HEARTBEAT_CMD) {
+        return; // Ignore sibling worker telemetry packets on shared channel
+    }
+    if (len != (int)sizeof(RehabCommandPacket_t)) {
         g_espnow_rx_bad++;
         return;
     }
     RehabCommandPacket_t pkt;
     memcpy(&pkt, data, sizeof(pkt));
-    if (pkt.pkt_type != PKT_HEARTBEAT_CMD || (pkt.target_node != NODE_TOPHUB && pkt.target_node != 0xFF)) {
+    if (pkt.target_node != NODE_TOPHUB && pkt.target_node != NODE_BROADCAST) {
         return;
     }
     uint16_t expected_crc = computeCRC16(&pkt, sizeof(RehabCommandPacket_t) - sizeof(uint16_t));
@@ -1708,6 +1718,11 @@ static void processPendingEspNowCmd(uint32_t now_ms) {
     g_espnow_rx_ok++;
     g_master_last_rx_ms = now_ms;
 
+    if (pkt.wifi_channel >= 1 && pkt.wifi_channel <= 13 && pkt.wifi_channel != g_wifi_channel) {
+        g_wifi_channel = pkt.wifi_channel;
+        esp_wifi_set_channel(g_wifi_channel, WIFI_SECOND_CHAN_NONE);
+    }
+
     if (!g_master_linked || memcmp(g_master_mac, src_mac, 6) != 0) {
         bool is_valid_unicast = (src_mac[0] | src_mac[1] | src_mac[2] | src_mac[3] | src_mac[4] | src_mac[5]) != 0 &&
                                 !(src_mac[0] == 0xFF && src_mac[1] == 0xFF && src_mac[2] == 0xFF);
@@ -1722,11 +1737,22 @@ static void processPendingEspNowCmd(uint32_t now_ms) {
     }
 
     // Apply clinical geometry & pathology updates (preserving 0.250 m pivot offset!)
+    bool geom_changed = false;
     if (isfinite(pkt.L_leg_m) && pkt.L_leg_m >= 0.15f && pkt.L_leg_m <= 0.60f) {
-        g_L_leg_m = pkt.L_leg_m;
+        if (fabsf(pkt.L_leg_m - g_L_leg_m) > 0.0005f) {
+            g_L_leg_m    = pkt.L_leg_m;
+            geom_changed = true;
+        }
     }
     if (isfinite(pkt.d_offset_m) && pkt.d_offset_m >= 0.0f && pkt.d_offset_m <= 0.95f * g_L_leg_m) {
-        g_d_offset_m = pkt.d_offset_m;
+        if (fabsf(pkt.d_offset_m - g_d_offset_m) > 0.0005f) {
+            g_d_offset_m = pkt.d_offset_m;
+            geom_changed = true;
+        }
+    }
+    if (geom_changed && g_is_homed) {
+        latchEncoderAngleDeg(mapKneeToArmAngleDeg(g_theta_k_deg, g_d_offset_m, g_L_leg_m));
+        g_gamma_factor = computeGammaFactor(g_theta_k_deg, g_d_offset_m, g_L_leg_m);
     }
     if (isfinite(pkt.rom_min_deg) && isfinite(pkt.rom_max_deg) &&
         pkt.rom_min_deg >= ROM_ABS_MIN_DEG && pkt.rom_max_deg <= ROM_ABS_MAX_DEG &&
@@ -1790,10 +1816,32 @@ static void processPendingEspNowCmd(uint32_t now_ms) {
     }
 
     switch (pkt.op_mode) {
-        case OP_SETUP_FULL_25S:
         case OP_SETUP_QUICK_6S: {
+            if (!g_espnow_oneshot_latched) {
+                stopAllImmediate();
+                g_spasm_latched          = false;
+                g_ctrl_from_espnow       = true;
+                g_espnow_oneshot_latched = true;
+                zeroACS712BootFallback();
+                float arm_deg            = mapKneeToArmAngleDeg(0.0f, g_d_offset_m, g_L_leg_m);
+                latchEncoderAngleDeg(arm_deg);
+                g_theta_m_deg            = arm_deg;
+                g_theta_k_deg            = 0.0f;
+                g_omega_m_deg_s          = 0.0f;
+                g_omega_k_deg_s          = 0.0f;
+                g_gamma_factor           = computeGammaFactor(0.0f, g_d_offset_m, g_L_leg_m);
+                g_traj_target_tk         = 0.0f;
+                g_assist_anchor_tk       = 0.0f;
+                g_is_homed               = true;
+                g_homing_msg_code        = 7;
+            }
+            break;
+        }
+
+        case OP_SETUP_FULL_25S: {
             if (!g_espnow_oneshot_latched && !(g_mode == MODE_AUTOHOME && g_ctrl_from_espnow)) {
                 if (!MOTOR_BIDIRECTIONAL_ENABLED || !g_acs_valid || (g_vbus_valid && g_vbus_volts < 15.0f)) {
+                    g_homing_msg_code = 3;
                     return;
                 }
                 stopAllImmediate();
@@ -1814,6 +1862,13 @@ static void processPendingEspNowCmd(uint32_t now_ms) {
 
         case OP_CPM: {
             g_cpm_speed_degs    = constrain(isfinite(pkt.target_vel_deg_s) ? pkt.target_vel_deg_s : DEFAULT_CPM_SPEED_DEGS, 3.0f, 60.0f);
+            if (isfinite(pkt.target_torque_ext) && pkt.target_torque_ext >= 4.0f) {
+                float kt_gbx = GEAR_RATIO * GEAR_EFFICIENCY * KT_MOTOR_NM_PER_A;
+                g_assist_max_i_a = constrain((pkt.target_torque_ext * g_gamma_factor) / kt_gbx,
+                                             2.5f, CONT_CURRENT_LIMIT_A);
+            } else {
+                g_assist_max_i_a = DEFAULT_ASSIST_MAX_I_A;
+            }
             g_cpm_target_cycles = 0;
             g_ctrl_from_espnow  = true;
             if (g_mode != MODE_CPM) {
@@ -1835,6 +1890,13 @@ static void processPendingEspNowCmd(uint32_t now_ms) {
             float spd = (isfinite(pkt.target_vel_deg_s) && pkt.target_vel_deg_s >= 5.0f)
                         ? pkt.target_vel_deg_s : DEFAULT_AST_SPEED_DEGS;
             g_assist_speed_degs = constrain(spd, 5.0f, 60.0f);
+            if (isfinite(pkt.target_torque_ext) && pkt.target_torque_ext >= 4.0f) {
+                float kt_gbx = GEAR_RATIO * GEAR_EFFICIENCY * KT_MOTOR_NM_PER_A;
+                g_assist_max_i_a = constrain((pkt.target_torque_ext * g_gamma_factor) / kt_gbx,
+                                             2.5f, CONT_CURRENT_LIMIT_A);
+            } else {
+                g_assist_max_i_a = DEFAULT_ASSIST_MAX_I_A;
+            }
             g_assist_auto_cycle = false;
             g_ctrl_from_espnow  = true;
             if (g_mode != MODE_ACTIVE_ASSIST) {
@@ -1932,12 +1994,26 @@ static void processPendingEspNowCmd(uint32_t now_ms) {
     }
 }
 
-static void sendEspNowTelemetry50Hz() {
+static void serviceEspNowChannelSync(uint32_t now_ms) {
     if (!g_wifi_enabled || !g_espnow_ready) return;
 
-    const uint8_t *dest = g_master_linked ? g_master_mac : nullptr;
-    static const uint8_t kBcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    if (dest == nullptr) dest = kBcast;
+    if (g_master_linked && (uint32_t)(now_ms - g_master_last_rx_ms) > ESPNOW_LINK_TIMEOUT_MS) {
+        g_master_linked   = false;
+        g_espnow_evt_code = 3;
+    }
+
+    if (!g_master_linked && g_mode == MODE_IDLE &&
+        (uint32_t)(now_ms - g_last_channel_hop_ms) >= ESPNOW_CHANNEL_HOP_MS) {
+        g_last_channel_hop_ms = now_ms;
+        g_wifi_channel = (uint8_t)((g_wifi_channel % 13U) + 1U);
+        esp_wifi_set_channel(g_wifi_channel, WIFI_SECOND_CHAN_NONE);
+    }
+}
+
+static void sendEspNowTelemetry50Hz() {
+    if (!g_wifi_enabled || !g_espnow_ready || !g_master_linked) return;
+
+    const uint8_t *dest = g_master_mac;
 
     TopHubTelemetryPacket_t telem = {};
     telem.pkt_type           = PKT_TOPHUB_TELEMETRY;
@@ -1949,6 +2025,8 @@ static void sendEspNowTelemetry50Hz() {
     if (g_chopper_duty_pct > 0.5f)                       telem.state_flags |= STATE_FLAG_CHOPPER_ACTIVE;
     if (g_spasm_latched)                                 telem.state_flags |= STATE_FLAG_SPASM_STOP;
     if (g_mode == MODE_HARDSTOP_LOCK || g_hardstop_locked) telem.state_flags |= STATE_FLAG_HARDSTOP_LOCKED;
+    if (g_espnow_fault_lockout)                          telem.state_flags |= STATE_FLAG_FAULT_LOCKOUT;
+    if (g_mode == MODE_AUTOHOME)                         telem.state_flags |= STATE_FLAG_BUSY_HOMING;
     telem.current_rep        = (g_rep_count > 65535U) ? (uint16_t)65535U : (uint16_t)g_rep_count;
     telem.knee_angle_deg     = g_theta_k_deg;
     telem.knee_vel_deg_s     = g_omega_k_deg_s;
@@ -3767,6 +3845,8 @@ void loop() {
 
     pollSerial();
 
+    serviceEspNowChannelSync(millis());
+
     if (g_wifi_enabled && g_espnow_ready &&
         (uint32_t)(millis() - last_espnow_ms) >= ESPNOW_TELEM_PERIOD_MS) {
         last_espnow_ms = millis();
@@ -3806,6 +3886,21 @@ void loop() {
         Serial.println("[SAFE] CHOP_OFF regen guard triggered (VBUS > 26.5 V during plugging) — braking output clamped to 0%.");
     }
 
+    if (g_espnow_evt_code != 0) {
+        uint8_t evt = g_espnow_evt_code;
+        g_espnow_evt_code = 0;
+        if (evt == 1) {
+            Serial.printf("[ESPNOW] Linked to Master U1 (%02X:%02X:%02X:%02X:%02X:%02X) on ch=%u\n",
+                          g_master_mac[0], g_master_mac[1], g_master_mac[2],
+                          g_master_mac[3], g_master_mac[4], g_master_mac[5],
+                          (unsigned)g_wifi_channel);
+        } else if (evt == 2) {
+            Serial.println("[ESPNOW] Therapy command blocked: Top-Hub is not homed (H:0). Send 'HOME'/'Set 0 deg Home' or 'AUTOHOME' first.");
+        } else if (evt == 3) {
+            Serial.println("[ESPNOW] Master U1 heartbeat timeout (>500 ms) — motor stopped to MODE_IDLE.");
+        }
+    }
+
     if (g_homing_msg_code != 0) {
         uint8_t code = g_homing_msg_code;
         g_homing_msg_code = 0;
@@ -3823,6 +3918,8 @@ void loop() {
         } else if (code == 6) {
             Serial.printf("[AUTOHOME] WARN: STOP1 latched (H:1), backoff timed out at Tk=%.2f deg (target %.1f deg).\n",
                           g_theta_k_deg, g_home_park_deg);
+        } else if (code == 7) {
+            Serial.println("[ESPNOW] Quick 0.00 deg Home & ACS712 zero latched (H:1). Ready for closed-loop therapy.");
         }
     }
 
@@ -3905,6 +4002,8 @@ void loop() {
                           (unsigned)g_wifi_channel);
         } else if (code == 2) {
             Serial.println("[ESPNOW] Remote clinical mode rejected: U2 is UNHOMED (send SETUP/Auto-Home first).");
+        } else if (code == 3) {
+            Serial.println("[ESPNOW] U1 Master heartbeat timeout — scanning channels 1..13...");
         }
     }
 

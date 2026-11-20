@@ -40,6 +40,32 @@
         </div>
       </div>
 
+      <!-- Top-Hub ESP-NOW Live Hardware Status & Homing Bar -->
+      <section class="clinical-flexion-card tophub-hw-card" id="topHubHardwareCard" aria-label="Top-Hub ESP32 hardware status and calibration">
+        <div class="clinical-flexion-top">
+          <div>
+            <span class="clinical-flexion-eyebrow">Master USB ↔ ESP-NOW ↔ Top-Hub U2</span>
+            <h2 id="topHubLinkTitle">Top-Hub Knee Module Telemetry</h2>
+          </div>
+          <div class="tophub-hw-actions">
+            <button class="mini-pill-btn" id="quickHomeBtn" type="button" title="Latch current arm angle as 0.0° full extension &amp; zero ACS712 current sensor">Set 0° Home</button>
+            <button class="mini-pill-btn" id="autoHomeBtn" type="button" title="Motorized seek toward STOP1 extension hard-stop (requires 24V power)">Auto-Home (STOP1)</button>
+            <button class="mini-pill-btn" id="releaseLockBtn" type="button" title="Release electronic hard-stop or spasm lockout">Release Lock</button>
+          </div>
+        </div>
+        <div class="clinical-flexion-grid tophub-telemetry-chips">
+          <span class="clinical-flexion-chip" id="thLinkChip">ESP-NOW: Waiting for Master…</span>
+          <span class="clinical-flexion-chip" id="thHomeChip">Home: Unhomed (H:0)</span>
+          <span class="clinical-flexion-chip" id="thAngleChip">Knee Angle θk: 0.0° (0.0°/s)</span>
+          <span class="clinical-flexion-chip" id="thPowerChip">Drive: 0.0 V · 0.00 A</span>
+          <span class="clinical-flexion-chip" id="thWorkChip">Last Rep Work: 0.00 J</span>
+        </div>
+        <div class="tophub-rom-meter" aria-hidden="true">
+          <div class="tophub-rom-fill" id="thAngleBarFill"></div>
+        </div>
+        <p class="tophub-hw-note" id="topHubStatusNote">Connect Master ESP32 over USB (115200 baud) and Wi-Fi. Use <strong>Set 0° Home</strong> with the arm at full extension before starting therapy.</p>
+      </section>
+
       <!-- STEP 1: Mode & Rep Configuration -->
       <section id="setupView" aria-label="Flexion and extension setup">
         <div class="inner-eyebrow">DOULA · Top-Hub Knee Module</div>
@@ -111,7 +137,13 @@
           </button>
         </div>
 
-        <div class="section-label">2. Choose Number of Repetitions</div>
+        <div class="tophub-extra-modes" role="group" aria-label="Additional Top-Hub clinical modes">
+          <span class="tophub-extra-label">Extended Top-Hub Modes:</span>
+          <button class="rep-preset-btn mode-pill-extra" type="button" data-mode="active_assist">Active Assist (Trigger-and-Go · OP 11)</button>
+          <button class="rep-preset-btn mode-pill-extra" type="button" data-mode="isometric">Isometric Hold (Angle Lock · OP 6)</button>
+        </div>
+
+        <div class="section-label">2. Choose Number of Repetitions &amp; Kinematics</div>
         <section class="surface-panel reps-panel" aria-label="Repetition count configuration">
           <div>
             <h2>How many reps?</h2>
@@ -130,6 +162,35 @@
                 <span>TARGET REPS</span>
               </div>
               <button class="circle-step-btn" id="repPlusBtn" type="button" aria-label="Increase repetitions">+</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="surface-panel tophub-kinematics-panel" aria-label="Range of motion and speed configuration">
+          <div class="tophub-kin-group">
+            <span class="tophub-kin-label">ROM Window (Extension → Flexion)</span>
+            <div class="tophub-kin-inputs">
+              <label class="tophub-num-label">Min °
+                <input class="tophub-num-input" id="romMinInput" type="number" min="0" max="170" step="1" value="0" />
+              </label>
+              <span class="tophub-kin-sep">to</span>
+              <label class="tophub-num-label">Max °
+                <input class="tophub-num-input" id="romMaxInput" type="number" min="10" max="180" step="1" value="110" />
+              </label>
+              <div class="rep-presets">
+                <button class="rep-preset-btn rom-preset-btn" type="button" data-rom-min="0" data-rom-max="90">0°–90°</button>
+                <button class="rep-preset-btn rom-preset-btn active" type="button" data-rom-min="0" data-rom-max="110">0°–110°</button>
+                <button class="rep-preset-btn rom-preset-btn" type="button" data-rom-min="0" data-rom-max="125">0°–125°</button>
+              </div>
+            </div>
+          </div>
+          <div class="tophub-kin-group">
+            <span class="tophub-kin-label" id="velInputLabel">Target Speed / Hold Angle</span>
+            <div class="tophub-kin-inputs">
+              <label class="tophub-num-label"><span id="velUnitText">Speed (°/s)</span>
+                <input class="tophub-num-input" id="targetVelInput" type="number" min="5" max="150" step="5" value="45" />
+              </label>
+              <button class="use-suggested-btn" id="applyKinematicsBtn" type="button">Sync to ESP</button>
             </div>
           </div>
         </section>
@@ -223,6 +284,17 @@
                 <button class="torque-step-btn" id="torquePlusBtn" type="button" aria-label="Increase torque">+</button>
               </div>
               <p class="esp-cmd-status" id="espCommandStatus" role="status">Ready to send torque adjustments to ESP.</p>
+              <div class="tophub-active-rom-row" aria-label="Live ROM window adjustment">
+                <span class="tophub-active-rom-label">Live ROM:</span>
+                <label class="tophub-num-label">Min
+                  <input class="tophub-num-input tophub-num-compact" id="activeRomMinInput" type="number" min="0" max="170" step="1" value="0" />
+                </label>
+                <span class="tophub-kin-sep">–</span>
+                <label class="tophub-num-label">Max
+                  <input class="tophub-num-input tophub-num-compact" id="activeRomMaxInput" type="number" min="10" max="180" step="1" value="110" />
+                </label>
+                <button class="mini-pill-btn" id="applyActiveRomBtn" type="button">Set ROM</button>
+              </div>
               <p class="esp-cmd-rec" id="activeTorqueRec" hidden></p>
             </div>
           </article>

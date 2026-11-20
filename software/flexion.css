@@ -1281,3 +1281,155 @@ a:focus-visible {
     gap: 12px;
   }
 }
+
+
+/* Top-Hub Hardware Status & Kinematics Extensions */
+.tophub-hw-card {
+  margin-bottom: 24px;
+}
+
+.tophub-hw-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.tophub-telemetry-chips {
+  margin-top: 2px;
+}
+
+.clinical-flexion-chip.ok {
+  background: #e1f2d5;
+  border-color: #b7d89c;
+  color: #294609;
+}
+
+.tophub-rom-meter {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: #e2ead7;
+  overflow: hidden;
+  margin: 12px 0 8px;
+}
+
+.tophub-rom-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3f580c, #698f1c);
+  transition: width 0.14s ease;
+}
+
+.tophub-hw-note {
+  margin: 0;
+  font-size: 12.5px;
+  color: #465341;
+  line-height: 1.45;
+}
+
+.tophub-extra-modes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: -14px 0 22px;
+}
+
+.tophub-extra-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #4d5d42;
+  margin-right: 4px;
+}
+
+.tophub-kinematics-panel {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.tophub-kin-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tophub-kin-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #4d5d42;
+}
+
+.tophub-kin-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.tophub-num-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #263120;
+}
+
+.tophub-num-input {
+  width: 68px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid #cddac0;
+  background: #ffffff;
+  color: #111111;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.tophub-kin-sep {
+  font-size: 13px;
+  color: #5b6657;
+}
+
+.hard-stop-btn.engaged {
+  background: #2e590e;
+  border-color: #2e590e;
+  color: #ffffff;
+}
+
+.tophub-active-rom-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #d9e3cc;
+}
+
+.tophub-active-rom-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #3f580c;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tophub-num-compact {
+  width: 58px;
+  padding: 5px 8px;
+  font-size: 13px;
+}

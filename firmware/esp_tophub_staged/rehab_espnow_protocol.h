@@ -6,22 +6,25 @@
 
 // ============================================================================
 // SHARED ESP-NOW PROTOCOL HEADER (U1: MASTER, U2: TOPHUB, U3: CYCLING)
-// Locked to 2.4 GHz Wi-Fi Channel 1 for Wi-Fi AP + ESP-NOW Coexistence
+// Synchronized identically across doula_esp32s/, doula_stepper_esp32/,
+// and esp_tophub_staged/ for standalone Arduino IDE compilation.
 // ============================================================================
 
-#define REHAB_WIFI_CHANNEL 1
+#define REHAB_PROTOCOL_VERSION 2
+#define REHAB_WIFI_CHANNEL     1
 
 enum NodeID : uint8_t {
-    NODE_MASTER  = 0x01, // U1: Web Server & Clinical Coordinator
-    NODE_TOPHUB  = 0x02, // U2: Top Hub Knee Flexion/Extension
-    NODE_CYCLING = 0x03  // U3: Bottom Tier Cycling & Eddy Brake
+    NODE_MASTER    = 0x01, // U1: WebSocket Bridge & Clinical Coordinator
+    NODE_TOPHUB    = 0x02, // U2: Top Hub Knee Flexion/Extension
+    NODE_CYCLING   = 0x03, // U3: Bottom Tier Cycling & Eddy Brake
+    NODE_BROADCAST = 0xFF  // Discovery / Broadcast target
 };
 
 enum PacketType : uint8_t {
-    PKT_HEARTBEAT_CMD      = 0x10, // Master -> Worker: Mode, Targets, Geometry, Hard-Stop, Setup
+    PKT_HEARTBEAT_CMD      = 0x10, // Master -> Worker: Mode, Targets, Geometry, Hard-Stop, Channel Sync
     PKT_TOPHUB_TELEMETRY   = 0x20, // U2 -> Master (50 Hz real-time stream)
     PKT_TOPHUB_REP_SUMMARY = 0x21, // U2 -> Master (Sent at completion of each rep)
-    PKT_CYCLING_TELEMETRY  = 0x30  // U3 -> Master (50 Hz real-time stream)
+    PKT_CYCLING_TELEMETRY  = 0x30  // U3 -> Master (20 Hz active / 5 Hz idle real-time stream)
 };
 
 enum OperatingMode : uint8_t {
@@ -48,8 +51,15 @@ enum PathologyProfile : uint8_t {
 
 enum HardStopMode : uint8_t {
     ESTOP_NORMAL            = 0, // Normal therapy operation
-    ESTOP_HARD_STOP_LOCKED  = 1, // <3ms Electronic Brake Hold with 75N Compliant Yield Ceiling
+    ESTOP_HARD_STOP_LOCKED  = 1, // <3ms Electronic Brake Hold / Stepper Unload
     ESTOP_HARD_STOP_RELEASE = 2  // Zero-Torque Freewheel / Arm Pressure Release
+};
+
+enum CyclingStepAction : uint8_t {
+    STEP_ACT_NONE  = 0, // Heartbeat / state sync only (no discrete step)
+    STEP_ACT_PLUS  = 1, // Move cycling stepper +1 step
+    STEP_ACT_MINUS = 2, // Move cycling stepper -1 step
+    STEP_ACT_HOME  = 3  // Return cycling stepper to 0.0 deg home
 };
 
 // State Flag Bits for TopHubTelemetryPacket_t::state_flags
@@ -58,22 +68,36 @@ enum HardStopMode : uint8_t {
 #define STATE_FLAG_CHOPPER_ACTIVE   (1 << 2)
 #define STATE_FLAG_SPASM_STOP       (1 << 3)
 #define STATE_FLAG_HARDSTOP_LOCKED  (1 << 4)
+#define STATE_FLAG_FAULT_LOCKOUT    (1 << 5)
+#define STATE_FLAG_BUSY_HOMING      (1 << 6)
 
-// 1. Master -> Worker Command Packet (37 Bytes packed)
+// State Flag Bits for CyclingTelemetryPacket_t::pedal_state_flags
+#define CYCLE_FLAG_STEPPER_HOMED    (1 << 0)
+#define CYCLE_FLAG_SESSION_ACTIVE   (1 << 1)
+#define CYCLE_FLAG_PEDALING_ACTIVE  (1 << 2)
+#define CYCLE_FLAG_COASTING         (1 << 3)
+#define CYCLE_FLAG_ESTOP_UNLOADED   (1 << 4)
+#define CYCLE_FLAG_ENC2_ACTIVE      (1 << 5)
+
+// 1. Master -> Worker Command Packet (45 Bytes packed)
 struct __attribute__((packed)) RehabCommandPacket_t {
     uint8_t  pkt_type;           // PKT_HEARTBEAT_CMD (0x10)
-    uint8_t  target_node;        // NODE_TOPHUB or NODE_CYCLING
-    uint16_t seq_num;            // Rolling sequence counter
+    uint8_t  target_node;        // NODE_TOPHUB, NODE_CYCLING, or NODE_BROADCAST
+    uint16_t seq_num;            // Rolling heartbeat sequence counter
+    uint32_t boot_id;            // Master boot session ID (distinguishes reboot vs duplicate seq)
+    uint8_t  wifi_channel;       // Master's active 2.4 GHz STA channel (1..13)
     uint8_t  op_mode;            // OperatingMode enum (0..11)
     uint8_t  pathology_profile;  // PathologyProfile enum (0..3)
     uint8_t  estop_active;       // HardStopMode enum (0=NORMAL, 1=LOCKED, 2=RELEASE)
+    uint8_t  stepper_action;     // CyclingStepAction enum (0..3)
+    uint16_t action_seq;         // Discrete event counter for stepper_action (deduped per boot_id)
     float    d_offset_m;         // Top-Hub vertical pivot offset [m]
     float    L_leg_m;            // Tibial pad distance from knee pivot [m]
     float    rom_min_deg;        // Extension limit [deg]
     float    rom_max_deg;        // Flexion limit [deg]
     float    target_vel_deg_s;   // Target speed [deg/s] (Top Hub) or Target Cadence [RPM]
-    float    target_torque_ext;  // Peak Knee Extension Torque [N*m]
-    float    target_torque_flex; // Peak Knee Flexion Torque [N*m]
+    float    target_torque_ext;  // Peak Knee Extension Torque [N*m] or Pedal Torque [N*m]
+    float    target_torque_flex; // Peak Knee Flexion Torque [N*m] or Power [W]
     uint16_t crc16;              // CRC-16-CCITT checksum
 };
 
@@ -82,7 +106,7 @@ struct __attribute__((packed)) TopHubTelemetryPacket_t {
     uint8_t  pkt_type;           // PKT_TOPHUB_TELEMETRY (0x20)
     uint8_t  node_id;            // NODE_TOPHUB (0x02)
     uint16_t seq_num;
-    uint8_t  state_flags;        // Bit0: Homed, Bit1: Calibrated, Bit2: Chopper, Bit3: Spasm, Bit4: HardStop
+    uint8_t  state_flags;        // STATE_FLAG_* bits
     uint16_t current_rep;        // Completed repetitions in current set
     float    knee_angle_deg;     // True anatomical knee angle theta_k [deg]
     float    knee_vel_deg_s;     // Instantaneous anatomical angular velocity [deg/s]
@@ -108,6 +132,25 @@ struct __attribute__((packed)) TopHubRepSummaryPacket_t {
     float    angle_at_peak_flex; // Angle where peak hamstring torque occurred [deg]
     float    rep_work_joules;    // Mechanical work integral(tau * d_theta) during rep [J]
     float    vel_cov_pct;        // Velocity coefficient of variation (smoothness) [%]
+    uint16_t crc16;
+};
+
+// 4. Cycling Node (U3) -> Master Real-Time Telemetry Packet (47 Bytes packed)
+struct __attribute__((packed)) CyclingTelemetryPacket_t {
+    uint8_t  pkt_type;           // PKT_CYCLING_TELEMETRY (0x30)
+    uint8_t  node_id;            // NODE_CYCLING (0x03)
+    uint16_t seq_num;
+    uint8_t  pedal_state_flags;  // CYCLE_FLAG_* bits
+    int32_t  current_steps;      // Current stepper position [steps]
+    int32_t  target_steps;       // Target stepper position [steps]
+    float    stepper_angle_deg;  // Current magnet stator disk angle alpha [0.0..45.0 deg]
+    float    pedal_rpm;          // Patient pedal cadence [RPM]
+    float    flywheel_rpm;       // Flywheel shaft speed [RPM]
+    float    user_pedal_torque;  // Estimated patient pedal torque [N*m]
+    float    user_pedal_force_n; // Tangential pedal force F_pedal = tau_pedal / 0.17m [N]
+    float    eddy_brake_torque;  // Current eddy brake torque reflected to pedals [N*m]
+    float    user_power_watts;   // Instantaneous active mechanical power [W]
+    float    total_work_joules;  // Cumulative active patient work in session [J]
     uint16_t crc16;
 };
 
