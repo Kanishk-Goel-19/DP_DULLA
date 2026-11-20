@@ -287,25 +287,46 @@ test('Live /ws/device bridge relays commands, telemetry, torque updates, and ESP
   const statusMsg = await client.waitForMessage((m) => m.type === 'esp_status' && m.connected === true)
   assert.equal(statusMsg.connected, true)
 
-  // Browser sends start_session & + / - torque adjustments -> ESP receives both
-  client.sendJson({ type: 'start_session', mode: 'cycling', op_mode: 7, torque_nm: 14, target_torque_ext: 14 })
-  client.sendJson({ type: 'set_torque', mode: 'cycling', op_mode: 7, torque_nm: 18, target_torque_ext: 18, delta: 4 })
+  // Browser sends cycling modes (Constant Torque, Constant Power, Isokinetic, Manual) -> ESP receives all
+  client.sendJson({ type: 'start_session', mode: 'cycle_torque', op_mode: 7, torque_nm: 14, target_torque_ext: 14 })
+  client.sendJson({ type: 'set_torque', mode: 'cycle_power', op_mode: 8, target_power_w: 90 })
+  client.sendJson({ type: 'set_torque', mode: 'cycle_isokinetic', op_mode: 14, target_cadence_rpm: 60 })
+  client.sendJson({ type: 'set_torque', mode: 'cycle_manual', op_mode: 15, step_action: 'plus', delta: 1 })
 
   const deadline = Date.now() + 2000
-  while (mockEsp.receivedCommands.length < 2 && Date.now() < deadline) {
+  while (mockEsp.receivedCommands.length < 4 && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 20))
   }
-  assert.equal(mockEsp.receivedCommands.length, 2)
+  assert.equal(mockEsp.receivedCommands.length, 4)
   assert.equal(mockEsp.receivedCommands[0].type, 'start_session')
-  assert.equal(mockEsp.receivedCommands[1].type, 'set_torque')
-  assert.equal(mockEsp.receivedCommands[1].torque_nm, 18)
+  assert.equal(mockEsp.receivedCommands[1].op_mode, 8)
+  assert.equal(mockEsp.receivedCommands[1].target_power_w, 90)
+  assert.equal(mockEsp.receivedCommands[2].op_mode, 14)
+  assert.equal(mockEsp.receivedCommands[2].target_cadence_rpm, 60)
+  assert.equal(mockEsp.receivedCommands[3].op_mode, 15)
+  assert.equal(mockEsp.receivedCommands[3].step_action, 'plus')
 
-  // ESP streams telemetry -> browser receives it cleanly
-  mockEsp.broadcast({ type: 'telemetry', mode: 'cycling', rpm: 74.2, speed: 23.0, torque: 18.0, reps: 4 })
+  // ESP streams real U3 cycling telemetry -> browser receives it cleanly
+  mockEsp.broadcast({
+    type: 'telemetry',
+    mode: 'cycling',
+    cycling_mode: 'power',
+    op_mode: 8,
+    u3_linked: 1,
+    enc2_active: 1,
+    rpm: 64.5,
+    speed: 20.0,
+    torque: 16.4,
+    user_power_watts: 110.8,
+    stepper_angle_deg: 21.3,
+    reps: 12,
+  })
   const telemMsg = await client.waitForMessage((m) => m.type === 'telemetry')
-  assert.equal(telemMsg.rpm, 74.2)
-  assert.equal(telemMsg.torque, 18.0)
-  assert.equal(telemMsg.reps, 4)
+  assert.equal(telemMsg.rpm, 64.5)
+  assert.equal(telemMsg.speed, 20.0)
+  assert.equal(telemMsg.torque, 16.4)
+  assert.equal(telemMsg.u3_linked, 1)
+  assert.equal(telemMsg.reps, 12)
 
   // Flexion 120-180 deg setup, begin_exercise, park_home, and spasm telemetry relay cleanly
   client.sendJson({ type: 'start_session', mode: 'passive', op_mode: 3, role: 'support', rom_min_deg: 120, rom_max_deg: 180, torque_nm: 12, target_vel_deg_s: 18 })
@@ -313,15 +334,15 @@ test('Live /ws/device bridge relays commands, telemetry, torque updates, and ESP
   client.sendJson({ type: 'park_home' })
 
   const flexDeadline = Date.now() + 2000
-  while (mockEsp.receivedCommands.length < 5 && Date.now() < flexDeadline) {
+  while (mockEsp.receivedCommands.length < 7 && Date.now() < flexDeadline) {
     await new Promise((r) => setTimeout(r, 20))
   }
-  assert.equal(mockEsp.receivedCommands.length, 5)
-  assert.equal(mockEsp.receivedCommands[2].type, 'start_session')
-  assert.equal(mockEsp.receivedCommands[2].rom_min_deg, 120)
-  assert.equal(mockEsp.receivedCommands[2].rom_max_deg, 180)
-  assert.equal(mockEsp.receivedCommands[3].type, 'begin_exercise')
-  assert.equal(mockEsp.receivedCommands[4].type, 'park_home')
+  assert.equal(mockEsp.receivedCommands.length, 7)
+  assert.equal(mockEsp.receivedCommands[4].type, 'start_session')
+  assert.equal(mockEsp.receivedCommands[4].rom_min_deg, 120)
+  assert.equal(mockEsp.receivedCommands[4].rom_max_deg, 180)
+  assert.equal(mockEsp.receivedCommands[5].type, 'begin_exercise')
+  assert.equal(mockEsp.receivedCommands[6].type, 'park_home')
 
   mockEsp.broadcast({ type: 'telemetry', mode: 'passive', setup_state: 'moving_to_start', setup_warning: 1, positioning: 1, knee_angle_deg: 45.0, spasm: 0 })
   const setupMsg = await client.waitForMessage((m) => m.type === 'telemetry' && m.setup_state === 'moving_to_start')

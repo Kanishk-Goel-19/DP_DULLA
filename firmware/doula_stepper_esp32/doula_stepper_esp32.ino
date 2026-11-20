@@ -191,16 +191,19 @@ void sendTelemetryToMaster() {
   if (g_coasting)                  telem.pedal_state_flags |= CYCLE_FLAG_COASTING;
   if (estopped)                    telem.pedal_state_flags |= CYCLE_FLAG_ESTOP_UNLOADED;
   if (ENABLE_FLYWHEEL_ENCODER)     telem.pedal_state_flags |= CYCLE_FLAG_ENC2_ACTIVE;
+  telem.active_mode        = sessionActive ? (uint8_t)OP_CYCLE_MANUAL : (uint8_t)OP_IDLE;
   telem.current_steps      = currentSteps;
   telem.target_steps       = targetSteps;
   telem.stepper_angle_deg  = stepsToAngleDeg(currentSteps);
   telem.pedal_rpm          = g_pedalRpm;
   telem.flywheel_rpm       = g_flywheelRpm;
+  telem.speed_kmh          = g_pedalRpm * 0.31f;
   telem.user_pedal_torque  = g_userPedalTorqueNm;
   telem.user_pedal_force_n = g_userPedalForceN;
   telem.eddy_brake_torque  = g_eddyBrakeTorqueNm;
   telem.user_power_watts   = g_userPowerWatts;
   telem.total_work_joules  = g_totalWorkJoules;
+  telem.completed_revs     = 0.0f;
   telem.crc16              = computeCRC16(&telem, sizeof(telem) - sizeof(uint16_t));
 
   esp_now_send(masterMac, reinterpret_cast<const uint8_t*>(&telem), sizeof(telem));

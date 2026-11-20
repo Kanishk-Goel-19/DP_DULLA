@@ -40,9 +40,9 @@ const uint16_t WS_PORT    = 81;
 //  - BENCH_SIMULATION_FALLBACK == true simulates only an unlinked node for USB bench testing.
 #define BENCH_SIMULATION_FALLBACK      true
 
-// When U3 is linked with ENABLE_FLYWHEEL_ENCODER == false, use U3's real stepper position
-// while synthesizing cycling RPM/speed/torque around targetTorqueNm for the cycling HUD.
-#define CYCLING_RPM_FALLBACK_NO_ENC2   true
+// When U3 is linked with ENABLE_FLYWHEEL_ENCODER == false, set true only if you want
+// synthetic preview RPM/speed/torque. Keep false for real ENC2 hardware telemetry (doula_cycling_modes).
+#define CYCLING_RPM_FALLBACK_NO_ENC2   false
 
 // Require explicit homing (Set 0 deg Home or Auto-Home STOP1) when U2 is unhomed (H:0).
 #define AUTO_HOME_U2_ON_START          false
@@ -75,10 +75,12 @@ struct SessionState {
   char modeName[24]  = "cycling";
   char role[16]      = "resistance";
 
-  float targetTorqueNm     = 14.0f;  // Extension / Cycling target [N*m]
+  float targetTorqueNm     = 15.0f;  // Extension / Cycling torque target [N*m]
   float targetTorqueFlexNm = 9.1f;   // Flexion target [N*m]
-  float targetVelDegS      = 45.0f;  // Speed [deg/s] or Cycling cadence [RPM]
-  float liveTorqueNm       = 0.0f;   // Measured/simulated applied torque
+  float targetVelDegS      = 45.0f;  // Top-Hub speed [deg/s] or Isometric hold angle [deg]
+  float targetPowerW       = 60.0f;  // Cycling Constant Power target [W]
+  float targetCadenceRpm   = 45.0f;  // Cycling Isokinetic Cadence target [RPM]
+  float liveTorqueNm       = 0.0f;   // Measured applied torque [N*m]
   int   targetReps         = 15;
   int   completedReps      = 0;
   float romMinDeg          = 120.0f;
@@ -172,6 +174,7 @@ uint8_t  manualSetupOp       = OP_IDLE;
 uint32_t manualSetupStartMs  = 0;
 bool     sawManualBusyHoming = false;
 uint16_t topHubRepBaseline   = 0;
+float    cyclingRevBaseline  = 0.0f;
 bool     repLimitAutoStopped = false;
 bool     u2FaultNotified     = false;
 bool     serialStreamTopHub  = false;
@@ -248,7 +251,26 @@ float clampf(float v, float lo, float hi) {
 }
 
 bool isCyclingMode(uint8_t opMode, const char* modeStr) {
-  return opMode == OP_CYCLE_TORQUE || opMode == OP_CYCLE_POWER || strcmp(modeStr, "cycling") == 0;
+  if (opMode == OP_CYCLE_TORQUE || opMode == OP_CYCLE_POWER ||
+      opMode == OP_CYCLE_ISOKINETIC || opMode == OP_CYCLE_MANUAL) {
+    return true;
+  }
+  if (!modeStr) return false;
+  return strcmp(modeStr, "cycling") == 0 ||
+         strcmp(modeStr, "cycle_torque") == 0 ||
+         strcmp(modeStr, "cycle_power") == 0 ||
+         strcmp(modeStr, "cycle_isokinetic") == 0 ||
+         strcmp(modeStr, "cycle_manual") == 0;
+}
+
+const char* cyclingSubModeKey(uint8_t opMode) {
+  switch (opMode) {
+    case OP_CYCLE_POWER:      return "power";
+    case OP_CYCLE_ISOKINETIC: return "isokinetic";
+    case OP_CYCLE_MANUAL:     return "manual";
+    case OP_CYCLE_TORQUE:
+    default:                  return "torque";
+  }
 }
 
 float maxAllowedTorque(uint8_t opMode, const char* role) {
@@ -449,9 +471,15 @@ void sendRehabCommand(uint8_t targetNode,
   pkt.L_leg_m            = gSession.lLegM;
   pkt.rom_min_deg        = gSession.romMinDeg;
   pkt.rom_max_deg        = gSession.romMaxDeg;
-  pkt.target_vel_deg_s   = gSession.targetVelDegS;
-  pkt.target_torque_ext  = gSession.targetTorqueNm;
-  pkt.target_torque_flex = gSession.targetTorqueFlexNm;
+  if (targetNode == NODE_CYCLING) {
+    pkt.target_vel_deg_s   = gSession.targetCadenceRpm;
+    pkt.target_torque_ext  = gSession.targetTorqueNm;
+    pkt.target_torque_flex = gSession.targetPowerW;
+  } else {
+    pkt.target_vel_deg_s   = gSession.targetVelDegS;
+    pkt.target_torque_ext  = gSession.targetTorqueNm;
+    pkt.target_torque_flex = gSession.targetTorqueFlexNm;
+  }
   pkt.crc16              = computeCRC16(&pkt, sizeof(pkt) - sizeof(uint16_t));
 
   const uint8_t* destMac = BROADCAST_MAC;
@@ -713,27 +741,44 @@ void processCyclingQueue() {
     registerOrRefreshWorkerPeer(u3Peer, item.srcMac);
     bool changed = (item.pkt.current_steps != gCyclingTelem.current_steps) ||
                    (item.pkt.target_steps  != gCyclingTelem.target_steps)  ||
+                   (item.pkt.active_mode   != gCyclingTelem.active_mode)   ||
                    ((item.pkt.pedal_state_flags & CYCLE_FLAG_SESSION_ACTIVE) !=
                     (gCyclingTelem.pedal_state_flags & CYCLE_FLAG_SESSION_ACTIVE));
     gCyclingTelem = item.pkt;
 
     if (changed) {
       Serial.printf(
-        "[U3 RX] active=%d steps=%ld/%ld angle=%.2f deg enc2=%d\n",
+        "[U3 RX] mode=%u active=%d steps=%ld/%ld angle=%.2f deg rpm=%.1f spd=%.1f km/h tau=%.2f Nm enc2=%d\n",
+        (unsigned)gCyclingTelem.active_mode,
         (gCyclingTelem.pedal_state_flags & CYCLE_FLAG_SESSION_ACTIVE) ? 1 : 0,
         (long)gCyclingTelem.current_steps,
         (long)gCyclingTelem.target_steps,
         gCyclingTelem.stepper_angle_deg,
+        gCyclingTelem.pedal_rpm,
+        gCyclingTelem.speed_kmh,
+        fmaxf(0.0f, fmaxf(gCyclingTelem.user_pedal_torque, gCyclingTelem.eddy_brake_torque)),
         (gCyclingTelem.pedal_state_flags & CYCLE_FLAG_ENC2_ACTIVE) ? 1 : 0
       );
     }
 
-    if (gSession.active && !gSession.paused && !gSession.estopped &&
-        isCyclingMode(gSession.opMode, gSession.modeName) &&
-        (gCyclingTelem.pedal_state_flags & CYCLE_FLAG_ENC2_ACTIVE) != 0) {
+    bool enc2Active = (gCyclingTelem.pedal_state_flags & CYCLE_FLAG_ENC2_ACTIVE) != 0;
+    if (enc2Active) {
       gSession.rpm          = gCyclingTelem.pedal_rpm;
-      gSession.speedKmh     = gSession.rpm * 0.31f;
-      gSession.liveTorqueNm = fmaxf(gCyclingTelem.eddy_brake_torque, gCyclingTelem.user_pedal_torque);
+      gSession.speedKmh     = (gCyclingTelem.speed_kmh > 0.0f || gCyclingTelem.pedal_rpm <= 0.01f)
+                                ? gCyclingTelem.speed_kmh
+                                : (gCyclingTelem.pedal_rpm * 0.31f);
+      gSession.liveTorqueNm = fmaxf(0.0f, fmaxf(gCyclingTelem.user_pedal_torque, gCyclingTelem.eddy_brake_torque));
+
+      if (gSession.active && !gSession.paused && !gSession.estopped &&
+          isCyclingMode(gSession.opMode, gSession.modeName)) {
+        if (gCyclingTelem.completed_revs < cyclingRevBaseline) {
+          cyclingRevBaseline = 0.0f; // Handle U3 reset/zero mid-session
+        }
+        int realRevs = (int)floorf(gCyclingTelem.completed_revs - cyclingRevBaseline);
+        if (realRevs > gSession.completedReps) {
+          gSession.completedReps = realRevs;
+        }
+      }
     }
   }
 }
@@ -774,16 +819,22 @@ void sendTelemetryFrame() {
     setupStateStr = "moving_to_start";
   }
 
-  char buf[1024];
+  char buf[1400];
   if (isCyclingMode(gSession.opMode, gSession.modeName)) {
-    bool enc2On = u3Peer.linked && ((gCyclingTelem.pedal_state_flags & CYCLE_FLAG_ENC2_ACTIVE) != 0);
+    bool enc2On       = u3Peer.linked && ((gCyclingTelem.pedal_state_flags & CYCLE_FLAG_ENC2_ACTIVE) != 0);
+    int  pedalingOn   = (u3Peer.linked && ((gCyclingTelem.pedal_state_flags & CYCLE_FLAG_PEDALING_ACTIVE) != 0)) ? 1 : 0;
+    int  coastingOn   = (u3Peer.linked && ((gCyclingTelem.pedal_state_flags & CYCLE_FLAG_COASTING) != 0)) ? 1 : 0;
+    int  dobOn        = (u3Peer.linked && ((gCyclingTelem.pedal_state_flags & CYCLE_FLAG_DOB_ENABLED) != 0)) ? 1 : 0;
     snprintf(
       buf,
       sizeof(buf),
-      "{\"type\":\"telemetry\",\"mode\":\"cycling\",\"op_mode\":%u,\"active\":%d,"
-      "\"rpm\":%.1f,\"speed\":%.1f,\"torque\":%.1f,\"target_torque\":%.1f,"
-      "\"stepper_angle_deg\":%.2f,\"stepper_steps\":%ld,"
-      "\"u3_linked\":%d,\"enc2_active\":%d,\"user_pedal_torque\":%.2f,\"user_power_watts\":%.1f,"
+      "{\"type\":\"telemetry\",\"mode\":\"cycling\",\"cycling_mode\":\"%s\",\"op_mode\":%u,\"u3_op_mode\":%u,\"active\":%d,"
+      "\"rpm\":%.1f,\"flywheel_rpm\":%.1f,\"speed\":%.1f,\"torque\":%.2f,"
+      "\"target_torque\":%.1f,\"target_power_w\":%.0f,\"target_cadence_rpm\":%.0f,"
+      "\"stepper_angle_deg\":%.2f,\"stepper_steps\":%ld,\"target_steps\":%ld,"
+      "\"u3_linked\":%d,\"enc2_active\":%d,\"pedaling_active\":%d,\"coasting\":%d,\"dob_enabled\":%d,"
+      "\"user_pedal_torque\":%.2f,\"eddy_brake_torque\":%.2f,\"user_pedal_force_n\":%.1f,"
+      "\"user_power_watts\":%.1f,\"total_work_joules\":%.1f,\"completed_revs\":%.2f,"
       "\"u2_linked\":%d,\"homed\":%d,\"calibrated\":%d,\"spasm\":%d,\"hardstop_locked\":%d,"
       "\"busy_homing\":%d,\"positioning\":%d,\"fault_lockout\":%d,"
       "\"setup_state\":\"%s\",\"setup_warning\":%d,\"setup_target_deg\":%.1f,"
@@ -791,18 +842,31 @@ void sendTelemetryFrame() {
       "\"motor_current_a\":%.2f,\"vbus_v\":%.2f,\"rom_min_deg\":%.1f,\"rom_max_deg\":%.1f,"
       "\"target_vel_deg_s\":%.1f,\"last_rep_work_j\":%.2f,"
       "\"reps\":%d,\"estop\":%d,\"paused\":%d,\"uptime_ms\":%lu}",
+      cyclingSubModeKey(gSession.opMode),
       (unsigned)gSession.opMode,
+      u3Peer.linked ? (unsigned)gCyclingTelem.active_mode : 0U,
       gSession.active ? 1 : 0,
-      gSession.rpm,
-      gSession.speedKmh,
-      gSession.liveTorqueNm,
+      u3Peer.linked ? gSession.rpm : 0.0f,
+      u3Peer.linked ? gCyclingTelem.flywheel_rpm : 0.0f,
+      u3Peer.linked ? gSession.speedKmh : 0.0f,
+      u3Peer.linked ? gSession.liveTorqueNm : 0.0f,
       gSession.targetTorqueNm,
-      gCyclingTelem.stepper_angle_deg,
-      (long)gCyclingTelem.current_steps,
+      gSession.targetPowerW,
+      gSession.targetCadenceRpm,
+      u3Peer.linked ? gCyclingTelem.stepper_angle_deg : 0.0f,
+      u3Peer.linked ? (long)gCyclingTelem.current_steps : 0L,
+      u3Peer.linked ? (long)gCyclingTelem.target_steps : 0L,
       u3Peer.linked ? 1 : 0,
       enc2On ? 1 : 0,
-      gCyclingTelem.user_pedal_torque,
-      gCyclingTelem.user_power_watts,
+      pedalingOn,
+      coastingOn,
+      dobOn,
+      u3Peer.linked ? gCyclingTelem.user_pedal_torque : 0.0f,
+      u3Peer.linked ? gCyclingTelem.eddy_brake_torque : 0.0f,
+      u3Peer.linked ? gCyclingTelem.user_pedal_force_n : 0.0f,
+      u3Peer.linked ? gCyclingTelem.user_power_watts : 0.0f,
+      u3Peer.linked ? gCyclingTelem.total_work_joules : 0.0f,
+      u3Peer.linked ? gCyclingTelem.completed_revs : 0.0f,
       u2Peer.linked ? 1 : 0,
       homed,
       calibrated,
@@ -928,9 +992,11 @@ void startSessionCommon(uint8_t targetOpMode) {
   sawU2Positioning       = false;
 
   if (isCyclingMode(gSession.opMode, gSession.modeName)) {
-    gSession.rpm          = 66.0f;
-    gSession.speedKmh     = gSession.rpm * 0.31f;
-    gSession.liveTorqueNm = gSession.targetTorqueNm;
+    cyclingRevBaseline    = u3Peer.linked ? gCyclingTelem.completed_revs : 0.0f;
+    bool useRealU3        = u3Peer.linked && ((gCyclingTelem.pedal_state_flags & CYCLE_FLAG_ENC2_ACTIVE) != 0);
+    gSession.rpm          = useRealU3 ? gCyclingTelem.pedal_rpm : 0.0f;
+    gSession.speedKmh     = useRealU3 ? gCyclingTelem.speed_kmh : 0.0f;
+    gSession.liveTorqueNm = useRealU3 ? fmaxf(0.0f, fmaxf(gCyclingTelem.user_pedal_torque, gCyclingTelem.eddy_brake_torque)) : 0.0f;
     syncAllNodesImmediate(2);
     return;
   }
@@ -1017,11 +1083,28 @@ void handleWebsiteJson(const String& payload) {
       nextOp = OP_ISOMETRIC;
     } else if (strcmp(gSession.modeName, "active_assist") == 0) {
       nextOp = OP_ACTIVE_ASSIST;
+    } else if (strcmp(gSession.modeName, "cycle_power") == 0) {
+      nextOp = OP_CYCLE_POWER;
+    } else if (strcmp(gSession.modeName, "cycle_isokinetic") == 0) {
+      nextOp = OP_CYCLE_ISOKINETIC;
+    } else if (strcmp(gSession.modeName, "cycle_manual") == 0) {
+      nextOp = OP_CYCLE_MANUAL;
+    } else if (strcmp(gSession.modeName, "cycle_torque") == 0 || strcmp(gSession.modeName, "cycling") == 0) {
+      nextOp = OP_CYCLE_TORQUE;
     }
 
     float tqVal = 0.0f;
     if (jsonGetFloat(payload, "torque_nm", tqVal) || jsonGetFloat(payload, "target_torque_ext", tqVal)) {
-      gSession.targetTorqueNm = clampf(tqVal, 0.0f, maxAllowedTorque(nextOp, gSession.role));
+      gSession.targetTorqueNm = clampf(tqVal, isCyclingMode(nextOp, gSession.modeName) ? 2.0f : 0.0f,
+                                       maxAllowedTorque(nextOp, gSession.role));
+    }
+    float pwrVal = 0.0f;
+    if (jsonGetFloat(payload, "target_power_w", pwrVal)) {
+      gSession.targetPowerW = clampf(pwrVal, 15.0f, 250.0f);
+    }
+    float cadVal = 0.0f;
+    if (jsonGetFloat(payload, "target_cadence_rpm", cadVal)) {
+      gSession.targetCadenceRpm = clampf(cadVal, 15.0f, 100.0f);
     }
     float tqFlexVal = 0.0f;
     if (jsonGetFloat(payload, "target_torque_flex", tqFlexVal)) {
@@ -1107,6 +1190,14 @@ void handleWebsiteJson(const String& payload) {
       gSession.opMode = OP_ISOMETRIC;
     } else if (strcmp(gSession.modeName, "active_assist") == 0) {
       gSession.opMode = OP_ACTIVE_ASSIST;
+    } else if (strcmp(gSession.modeName, "cycle_power") == 0) {
+      gSession.opMode = OP_CYCLE_POWER;
+    } else if (strcmp(gSession.modeName, "cycle_isokinetic") == 0) {
+      gSession.opMode = OP_CYCLE_ISOKINETIC;
+    } else if (strcmp(gSession.modeName, "cycle_manual") == 0) {
+      gSession.opMode = OP_CYCLE_MANUAL;
+    } else if (strcmp(gSession.modeName, "cycle_torque") == 0) {
+      gSession.opMode = OP_CYCLE_TORQUE;
     }
 
     float rMin = 120.0f, rMax = 180.0f;
@@ -1149,7 +1240,16 @@ void handleWebsiteJson(const String& payload) {
     float prevTq = gSession.targetTorqueNm;
     float nextTq = gSession.targetTorqueNm;
     if (jsonGetFloat(payload, "torque_nm", nextTq) || jsonGetFloat(payload, "target_torque_ext", nextTq)) {
-      gSession.targetTorqueNm = clampf(nextTq, 0.0f, maxAllowedTorque(gSession.opMode, gSession.role));
+      gSession.targetTorqueNm = clampf(nextTq, isCyclingMode(gSession.opMode, gSession.modeName) ? 2.0f : 0.0f,
+                                       maxAllowedTorque(gSession.opMode, gSession.role));
+    }
+    float pwrVal = 0.0f;
+    if (jsonGetFloat(payload, "target_power_w", pwrVal)) {
+      gSession.targetPowerW = clampf(pwrVal, 15.0f, 250.0f);
+    }
+    float cadVal = 0.0f;
+    if (jsonGetFloat(payload, "target_cadence_rpm", cadVal)) {
+      gSession.targetCadenceRpm = clampf(cadVal, 15.0f, 100.0f);
     }
     float tqFlexVal = 0.0f;
     if (jsonGetFloat(payload, "target_torque_flex", tqFlexVal)) {
@@ -1159,22 +1259,47 @@ void handleWebsiteJson(const String& payload) {
     }
 
     if (isCyclingMode(gSession.opMode, gSession.modeName)) {
-      float deltaVal = 0.0f;
-      bool hasDelta = jsonGetFloat(payload, "delta", deltaVal);
-      if (hasDelta && deltaVal > 0.0f) {
-        stepCyclingStepper(1);
-      } else if (hasDelta && deltaVal < 0.0f) {
-        stepCyclingStepper(-1);
-      } else if (gSession.targetTorqueNm > prevTq + 0.001f) {
-        stepCyclingStepper(1);
-      } else if (gSession.targetTorqueNm < prevTq - 0.001f) {
-        stepCyclingStepper(-1);
+      uint8_t estop = gSession.estopped ? ESTOP_HARD_STOP_LOCKED : ESTOP_NORMAL;
+      String stepActStr;
+      if (jsonGetString(payload, "step_action", stepActStr)) {
+        if (stepActStr.equalsIgnoreCase("plus")) {
+          stepCyclingStepper(1);
+        } else if (stepActStr.equalsIgnoreCase("minus")) {
+          stepCyclingStepper(-1);
+        } else if (stepActStr.equalsIgnoreCase("home")) {
+          sendRehabCommand(NODE_CYCLING, desiredCyclingOpMode(), estop, STEP_ACT_HOME, true, 2);
+        } else if (stepActStr.equalsIgnoreCase("zero")) {
+          sendRehabCommand(NODE_CYCLING, desiredCyclingOpMode(), estop, STEP_ACT_ZERO, true, 2);
+        }
+      } else if (gSession.opMode == OP_CYCLE_MANUAL) {
+        float deltaVal = 0.0f;
+        bool hasDelta = jsonGetFloat(payload, "delta", deltaVal);
+        if (hasDelta && deltaVal > 0.0f) {
+          stepCyclingStepper(1);
+        } else if (hasDelta && deltaVal < 0.0f) {
+          stepCyclingStepper(-1);
+        } else {
+          sendRehabCommand(NODE_CYCLING, desiredCyclingOpMode(), estop, STEP_ACT_NONE, false, 2);
+        }
+      } else {
+        // Closed-loop cycling modes (TORQUE / POWER / ISOKINETIC): push exact setpoints directly
+        (void)prevTq;
+        sendRehabCommand(NODE_CYCLING, desiredCyclingOpMode(), estop, STEP_ACT_NONE, false, 2);
       }
     } else {
       sendRehabCommand(NODE_TOPHUB, desiredTopHubOpMode(),
                        gSession.estopped ? ESTOP_HARD_STOP_LOCKED : ESTOP_NORMAL,
                        STEP_ACT_NONE, false, 1);
     }
+    logCommandState(cmdType.c_str());
+    sendTelemetryFrame();
+    return;
+  }
+
+  if (cmdType == "cycling_home" || cmdType == "cycling_zero") {
+    uint8_t estop = gSession.estopped ? ESTOP_HARD_STOP_LOCKED : ESTOP_NORMAL;
+    uint8_t act   = (cmdType == "cycling_zero") ? STEP_ACT_ZERO : STEP_ACT_HOME;
+    sendRehabCommand(NODE_CYCLING, desiredCyclingOpMode(), estop, act, true, 2);
     logCommandState(cmdType.c_str());
     sendTelemetryFrame();
     return;
@@ -1409,10 +1534,14 @@ void onWebSocketEvent(uint8_t clientNum, WStype_t type, uint8_t* payload, size_t
 // 6. PER-NODE TELEMETRY / SIMULATION ARBITRATION
 // ============================================================================
 void updateRehabKinematics(uint32_t dtMs) {
+  bool u3HasEnc2 = u3Peer.linked && ((gCyclingTelem.pedal_state_flags & CYCLE_FLAG_ENC2_ACTIVE) != 0);
+
   if (!gSession.active || gSession.paused || gSession.estopped) {
-    gSession.liveTorqueNm = 0.0f;
-    gSession.rpm          = 0.0f;
-    gSession.speedKmh     = 0.0f;
+    if (!u3HasEnc2 || gSession.estopped || !isCyclingMode(gSession.opMode, gSession.modeName)) {
+      gSession.liveTorqueNm = 0.0f;
+      gSession.rpm          = 0.0f;
+      gSession.speedKmh     = 0.0f;
+    }
     return;
   }
 
@@ -1420,18 +1549,12 @@ void updateRehabKinematics(uint32_t dtMs) {
   gSession.activeMs += dtMs;
 
   if (isCyclingMode(gSession.opMode, gSession.modeName)) {
-    bool useLiveEnc2 = u3Peer.linked && ((gCyclingTelem.pedal_state_flags & CYCLE_FLAG_ENC2_ACTIVE) != 0);
-    if (useLiveEnc2) {
-      gSession.cycleProgress += dtSec * (gSession.rpm / 180.0f);
-      if (gSession.cycleProgress >= 1.0f) {
-        gSession.cycleProgress -= 1.0f;
-        gSession.completedReps += 1;
-      }
+    if (u3HasEnc2) {
+      // Real ENC2 telemetry (RPM, speed, torque, revs) is updated directly in processCyclingQueue().
       return;
     }
 
-    bool allowCyclingSim = (!u3Peer.linked && BENCH_SIMULATION_FALLBACK) ||
-                           (u3Peer.linked && CYCLING_RPM_FALLBACK_NO_ENC2);
+    bool allowCyclingSim = u3Peer.linked && CYCLING_RPM_FALLBACK_NO_ENC2;
     if (!allowCyclingSim) {
       gSession.rpm          = 0.0f;
       gSession.speedKmh     = 0.0f;
@@ -1514,7 +1637,11 @@ void printSerialHelp() {
   Serial.println("  PAUSE | RESUME | STOP/END  : Pause, resume, or stop active session");
   Serial.println("  ESTOP / LOCK               : Engage electronic Hard-Stop on U2 & unload U3");
   Serial.println("  RELEASE / CLEAR            : Release Hard-Stop lock on U2 & U3 -> OP_IDLE");
-  Serial.println("  START | + | -              : Start Cycling session or step U3 stepper +/-7.5 deg\n");
+  Serial.println("  CMANUAL                    : Start Cycling Manual mode (22.5 deg default, +/- steps)");
+  Serial.println("  CTORQUE [Nm]               : Start Cycling Constant Torque mode (2..85 Nm)");
+  Serial.println("  CPOWER [W]                 : Start Cycling Constant Power mode (15..250 W)");
+  Serial.println("  CISOK [RPM]                : Start Cycling Isokinetic Cadence mode (15..100 RPM)");
+  Serial.println("  START | + | -              : Start Cycling Torque or nudge U3 setpoint / stepper\n");
 }
 
 void printNodesStatus() {
@@ -1544,14 +1671,19 @@ void printNodesStatus() {
   Serial.println();
   Serial.printf("  U3 Cycling : %s", u3Peer.linked ? "LINKED" : "SCANNING");
   if (u3Peer.linked) {
-    Serial.printf(" (%02X:%02X:%02X:%02X:%02X:%02X, rx=%lu, steps=%ld/%ld, angle=%.2f deg, RPM=%.1f)",
+    Serial.printf(" (%02X:%02X:%02X:%02X:%02X:%02X, rx=%lu, mode=%u, steps=%ld/%ld, angle=%.2f deg, RPM=%.1f, spd=%.1f km/h, Tq=%.2f Nm, P=%.1f W, revs=%.1f)",
                   u3Peer.mac[0], u3Peer.mac[1], u3Peer.mac[2],
                   u3Peer.mac[3], u3Peer.mac[4], u3Peer.mac[5],
                   (unsigned long)u3Peer.rxCount,
+                  (unsigned)gCyclingTelem.active_mode,
                   (long)gCyclingTelem.current_steps,
                   (long)gCyclingTelem.target_steps,
                   gCyclingTelem.stepper_angle_deg,
-                  gCyclingTelem.pedal_rpm);
+                  gCyclingTelem.pedal_rpm,
+                  gCyclingTelem.speed_kmh,
+                  fmaxf(0.0f, fmaxf(gCyclingTelem.user_pedal_torque, gCyclingTelem.eddy_brake_torque)),
+                  gCyclingTelem.user_power_watts,
+                  gCyclingTelem.completed_revs);
   }
   Serial.println();
 }
@@ -1637,6 +1769,45 @@ void handleSerialCommands() {
     strcpy(gSession.role, "resistance");
     startSessionCommon(OP_CYCLE_TORQUE);
     logCommandState("serial_start");
+    sendTelemetryFrame();
+  } else if (upper == "CMANUAL") {
+    strcpy(gSession.modeName, "cycle_manual");
+    strcpy(gSession.role, "resistance");
+    startSessionCommon(OP_CYCLE_MANUAL);
+    logCommandState("serial_cmanual");
+    sendTelemetryFrame();
+  } else if (upper == "CTORQUE" || upper.startsWith("CTORQUE ")) {
+    float val = gSession.targetTorqueNm;
+    bool hasA = false, hasB = false;
+    float dummy = 0.0f;
+    parseTwoFloats(line.substring(7), val, hasA, dummy, hasB);
+    strcpy(gSession.modeName, "cycle_torque");
+    strcpy(gSession.role, "resistance");
+    if (hasA) gSession.targetTorqueNm = clampf(val, 2.0f, 85.0f);
+    startSessionCommon(OP_CYCLE_TORQUE);
+    logCommandState("serial_ctorque");
+    sendTelemetryFrame();
+  } else if (upper == "CPOWER" || upper.startsWith("CPOWER ")) {
+    float val = gSession.targetPowerW;
+    bool hasA = false, hasB = false;
+    float dummy = 0.0f;
+    parseTwoFloats(line.substring(6), val, hasA, dummy, hasB);
+    strcpy(gSession.modeName, "cycle_power");
+    strcpy(gSession.role, "resistance");
+    if (hasA) gSession.targetPowerW = clampf(val, 15.0f, 250.0f);
+    startSessionCommon(OP_CYCLE_POWER);
+    logCommandState("serial_cpower");
+    sendTelemetryFrame();
+  } else if (upper == "CISOK" || upper.startsWith("CISOK ")) {
+    float val = gSession.targetCadenceRpm;
+    bool hasA = false, hasB = false;
+    float dummy = 0.0f;
+    parseTwoFloats(line.substring(5), val, hasA, dummy, hasB);
+    strcpy(gSession.modeName, "cycle_isokinetic");
+    strcpy(gSession.role, "resistance");
+    if (hasA) gSession.targetCadenceRpm = clampf(val, 15.0f, 100.0f);
+    startSessionCommon(OP_CYCLE_ISOKINETIC);
+    logCommandState("serial_cisok");
     sendTelemetryFrame();
   } else if (upper == "CPM" || upper.startsWith("CPM ")) {
     float spd = 18.0f, tq = 12.0f;

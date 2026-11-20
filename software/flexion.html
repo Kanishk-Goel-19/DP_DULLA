@@ -34,40 +34,13 @@
       <div class="exercise-topline">
         <span class="exercise-mode-indicator demo" id="connectionBadge">● DEMO — NO ESP32</span>
         <div class="topline-links">
+          <a href="/device/">← Switch Session</a>
           <a href="/progress">See Progress ↗</a>
-          <a href="/device/">Switch Session</a>
-          <a href="/dashboard">← Back to dashboard</a>
+          <a href="/dashboard">Dashboard</a>
         </div>
       </div>
 
-      <!-- Top-Hub ESP-NOW Live Hardware Status & Homing Bar -->
-      <section class="clinical-flexion-card tophub-hw-card" id="topHubHardwareCard" aria-label="Top-Hub ESP32 hardware status and calibration">
-        <div class="clinical-flexion-top">
-          <div>
-            <span class="clinical-flexion-eyebrow">Master USB ↔ ESP-NOW ↔ Top-Hub U2</span>
-            <h2 id="topHubLinkTitle">Top-Hub Knee Module Telemetry</h2>
-          </div>
-          <div class="tophub-hw-actions">
-            <button class="mini-pill-btn" id="quickHomeBtn" type="button" title="Latch current arm angle as 0.0° full-park reference &amp; zero ACS712 current sensor">Set 0° Home</button>
-            <button class="mini-pill-btn" id="autoHomeBtn" type="button" title="Motorized seek toward STOP1 0° hard-stop (requires 24V power)">Auto-Home (STOP1)</button>
-            <button class="mini-pill-btn" id="parkHomeBtn" type="button" title="Slowly return arm from working range (120°–180°) back to 0° parked stop">Return to 0° Park</button>
-            <button class="mini-pill-btn" id="releaseLockBtn" type="button" title="Release electronic hard-stop or spasm lockout">Release Lock</button>
-          </div>
-        </div>
-        <div class="clinical-flexion-grid tophub-telemetry-chips">
-          <span class="clinical-flexion-chip" id="thLinkChip">ESP-NOW: Waiting for Master…</span>
-          <span class="clinical-flexion-chip" id="thHomeChip">Home: Unhomed (H:0)</span>
-          <span class="clinical-flexion-chip" id="thAngleChip">Knee Angle θk: 0.0° (0.0°/s)</span>
-          <span class="clinical-flexion-chip" id="thPowerChip">Drive: 0.0 V · 0.00 A</span>
-          <span class="clinical-flexion-chip" id="thWorkChip">Last Rep Work: 0.00 J</span>
-        </div>
-        <div class="tophub-rom-meter" aria-hidden="true">
-          <div class="tophub-rom-fill" id="thAngleBarFill"></div>
-        </div>
-        <p class="tophub-hw-note" id="topHubStatusNote">Connect Master ESP32 over USB (115200 baud) and Wi-Fi. Home at <strong>0° Home</strong>, keep clear while the arm moves slowly (<strong>10°/s</strong>) to <strong>120°</strong> extended start, then perform therapy in <strong>120°–180°</strong>.</p>
-      </section>
-
-      <!-- Safety, Setup Transition & Spasm Alert Banner -->
+      <!-- Safety, Setup Transition & Spasm Alert Banner (always visible when triggered) -->
       <section class="setup-safety-banner" id="setupWarningBanner" role="alert" aria-live="assertive" hidden>
         <div class="setup-banner-head">
           <span class="setup-banner-badge" id="setupBannerBadge">SAFETY</span>
@@ -92,138 +65,175 @@
         </div>
       </section>
 
-      <!-- STEP 1: Mode & Rep Configuration -->
+      <!-- STEP 1: Clear-Intent Mode & Rep Configuration -->
       <section id="setupView" aria-label="Flexion and extension setup">
-        <div class="inner-eyebrow">DOULA · Top-Hub Knee Module</div>
-        <h1 class="inner-title">Flexion &amp; Extension</h1>
-        <p class="inner-description">Select your training mode and set your target repetitions before beginning.</p>
+        <div class="setup-hero">
+          <div class="inner-eyebrow">DOULA · Top-Hub Knee Module</div>
+          <h1 class="inner-title">Choose Flexion Mode</h1>
+          <p class="inner-description">Pick how the knee arm assists or resists your movement, choose repetitions, and start.</p>
+          <section class="clinical-flexion-strip" id="clinicalFlexionCard" aria-live="polite" hidden></section>
+        </div>
 
-        <section class="clinical-flexion-card" id="clinicalFlexionCard" aria-live="polite" hidden></section>
-
-        <div class="section-label">1. Choose Training Mode</div>
         <div class="mode-grid" role="radiogroup" aria-label="Training mode">
           <button class="mode-card" type="button" data-mode="passive" role="radio" aria-checked="false">
             <div>
               <div class="mode-card-top">
-                <span class="role-pill support">Support Torque</span>
-                <span class="mode-rec-badge" data-rec-badge="passive" hidden>★ Clinical Rec</span>
+                <span class="role-pill support">Support</span>
+                <span class="mode-rec-badge" data-rec-badge="passive" hidden>★ Suggested</span>
                 <span class="selected-check">Selected ✓</span>
               </div>
+              <div class="curve-preview" aria-hidden="true">
+                <svg viewBox="0 0 200 44">
+                  <path d="M8 24 H192" stroke="#d5dfc8" stroke-width="1.5" stroke-dasharray="4 4" fill="none" />
+                  <path d="M8 30 C45 30, 60 14, 100 14 C140 14, 155 30, 192 30" stroke="#3f580c" stroke-width="2.6" fill="none" stroke-linecap="round" />
+                </svg>
+              </div>
               <h2 class="mode-title">Passive Assist</h2>
-              <p class="mode-sub">Motor-assisted CPM motion</p>
-              <p class="mode-desc">Gently guides knee flexion and extension with adjustable motor support torque.</p>
+              <p class="mode-desc">Gently guides your knee through flexion and extension with motor support.</p>
             </div>
-            <div class="curve-preview" aria-hidden="true">
-              <svg viewBox="0 0 200 40">
-                <path d="M8 22 H192" stroke="#d5dfc8" stroke-width="1.5" stroke-dasharray="4 4" fill="none" />
-                <path d="M8 28 C45 28, 60 14, 100 14 C140 14, 155 28, 192 28" stroke="#3f580c" stroke-width="2.5" fill="none" stroke-linecap="round" />
-              </svg>
-            </div>
-            <div class="mode-meta" data-mode-meta="passive">Suggested: 15 reps · Support 4–25 N·m</div>
+            <div class="mode-meta" data-mode-meta="passive">4–25 N·m · 15 reps typical</div>
           </button>
 
           <button class="mode-card selected" type="button" data-mode="isotonic" role="radio" aria-checked="true">
             <div>
               <div class="mode-card-top">
-                <span class="role-pill resistance">Resistance Torque</span>
-                <span class="mode-rec-badge" data-rec-badge="isotonic" hidden>★ Clinical Rec</span>
+                <span class="role-pill resistance">Resistance</span>
+                <span class="mode-rec-badge" data-rec-badge="isotonic" hidden>★ Suggested</span>
                 <span class="selected-check">Selected ✓</span>
               </div>
+              <div class="curve-preview" aria-hidden="true">
+                <svg viewBox="0 0 200 44">
+                  <path d="M8 34 H192" stroke="#d5dfc8" stroke-width="1.5" stroke-dasharray="4 4" fill="none" />
+                  <path d="M8 33 C40 33, 68 8, 105 8 C142 8, 165 26, 192 31" stroke="#3f580c" stroke-width="2.6" fill="none" stroke-linecap="round" />
+                </svg>
+              </div>
               <h2 class="mode-title">Isotonic Mode</h2>
-              <p class="mode-sub">Physiological curve-shaped isotonic</p>
-              <p class="mode-desc">Angle-mapped resistance peaking mid-arc with ACL-safe terminal extension taper.</p>
+              <p class="mode-desc">Smooth angle-mapped resistance peaking mid-arc with gentle end-range taper.</p>
             </div>
-            <div class="curve-preview" aria-hidden="true">
-              <svg viewBox="0 0 200 40">
-                <path d="M8 32 H192" stroke="#d5dfc8" stroke-width="1.5" stroke-dasharray="4 4" fill="none" />
-                <path d="M8 31 C40 31, 68 8, 105 8 C142 8, 165 25, 192 29" stroke="#3f580c" stroke-width="2.5" fill="none" stroke-linecap="round" />
-              </svg>
-            </div>
-            <div class="mode-meta" data-mode-meta="isotonic">Suggested: 12 reps · Resistance 5–45 N·m</div>
+            <div class="mode-meta" data-mode-meta="isotonic">5–45 N·m · 12 reps typical</div>
           </button>
 
           <button class="mode-card" type="button" data-mode="isokinetic" role="radio" aria-checked="false">
             <div>
               <div class="mode-card-top">
-                <span class="role-pill resistance">Resistance Torque</span>
-                <span class="mode-rec-badge" data-rec-badge="isokinetic" hidden>★ Clinical Rec</span>
+                <span class="role-pill resistance">Resistance</span>
+                <span class="mode-rec-badge" data-rec-badge="isokinetic" hidden>★ Suggested</span>
                 <span class="selected-check">Selected ✓</span>
               </div>
+              <div class="curve-preview" aria-hidden="true">
+                <svg viewBox="0 0 200 44">
+                  <path d="M8 34 H192" stroke="#d5dfc8" stroke-width="1.5" stroke-dasharray="4 4" fill="none" />
+                  <path d="M8 32 L34 13 H166 L192 32" stroke="#3f580c" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </div>
               <h2 class="mode-title">Isokinetic Mode</h2>
-              <p class="mode-sub">Constant-velocity accommodating</p>
-              <p class="mode-desc">Dynamically matches your muscular push while capping peak speed through each rep.</p>
+              <p class="mode-desc">Matches your effort while keeping movement speed steady and controlled.</p>
             </div>
-            <div class="curve-preview" aria-hidden="true">
-              <svg viewBox="0 0 200 40">
-                <path d="M8 32 H192" stroke="#d5dfc8" stroke-width="1.5" stroke-dasharray="4 4" fill="none" />
-                <path d="M8 30 L32 13 H168 L192 30" stroke="#3f580c" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-            </div>
-            <div class="mode-meta" data-mode-meta="isokinetic">Suggested: 10 reps · Resistance 10–45 N·m</div>
+            <div class="mode-meta" data-mode-meta="isokinetic">10–45 N·m · 10 reps typical</div>
           </button>
         </div>
 
-        <div class="tophub-extra-modes" role="group" aria-label="Additional Top-Hub clinical modes">
-          <span class="tophub-extra-label">Extended Top-Hub Modes:</span>
-          <button class="rep-preset-btn mode-pill-extra" type="button" data-mode="active_assist">Active Assist (Trigger-and-Go · OP 11)</button>
-          <button class="rep-preset-btn mode-pill-extra" type="button" data-mode="isometric">Isometric Hold (Angle Lock · OP 6)</button>
+        <div class="tophub-extra-modes" role="group" aria-label="Additional modes">
+          <span class="tophub-extra-label">More modes:</span>
+          <button class="rep-preset-btn mode-pill-extra" type="button" data-mode="active_assist">Active Assist (Trigger-and-Go)</button>
+          <button class="rep-preset-btn mode-pill-extra" type="button" data-mode="isometric">Isometric Hold (Angle Lock)</button>
         </div>
 
-        <div class="section-label">2. Choose Number of Repetitions &amp; Kinematics</div>
-        <section class="surface-panel reps-panel" aria-label="Repetition count configuration">
-          <div>
-            <h2>How many reps?</h2>
-            <div class="therapist-suggestion" id="therapistSuggestionBox">
-              <span><span id="suggestionSourceLabel">Therapist suggested</span> for <strong id="suggestedModeName">Isotonic Mode</strong>: <strong id="suggestedRepCount">12 reps</strong></span>
-              <button class="use-suggested-btn" id="useSuggestedBtn" type="button">Use suggested</button>
+        <!-- Unified Clean Action Bar: Reps + Start CTA -->
+        <section class="surface-panel flex-action-bar" aria-label="Repetition count and start">
+          <div class="flex-reps-side">
+            <div class="flex-reps-head">
+              <span class="section-label" style="margin-bottom:0;">Target Repetitions</span>
+              <span class="therapist-inline" id="therapistSuggestionBox">
+                <span id="suggestionSourceLabel">Suggested</span> for <strong id="suggestedModeName">Isotonic Mode</strong>: <strong id="suggestedRepCount">12 reps</strong>
+                <button class="inline-apply-btn" id="useSuggestedBtn" type="button">Apply</button>
+              </span>
             </div>
-          </div>
-
-          <div class="reps-controls">
-            <div class="rep-presets" id="repPresets" aria-label="Quick rep count presets"></div>
-            <div class="rep-stepper">
-              <button class="circle-step-btn" id="repMinusBtn" type="button" aria-label="Decrease repetitions">−</button>
-              <div class="rep-value-box">
-                <strong id="repTargetDisplay">12</strong>
-                <span>TARGET REPS</span>
-              </div>
-              <button class="circle-step-btn" id="repPlusBtn" type="button" aria-label="Increase repetitions">+</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="surface-panel tophub-kinematics-panel" aria-label="Range of motion and speed configuration">
-          <div class="tophub-kin-group">
-            <span class="tophub-kin-label">Working ROM Window (120° Extended → 180° Flexed)</span>
-            <div class="tophub-kin-inputs">
-              <label class="tophub-num-label">Min °
-                <input class="tophub-num-input" id="romMinInput" type="number" min="120" max="170" step="1" value="120" />
-              </label>
-              <span class="tophub-kin-sep">to</span>
-              <label class="tophub-num-label">Max °
-                <input class="tophub-num-input" id="romMaxInput" type="number" min="130" max="180" step="1" value="180" />
-              </label>
-              <div class="rep-presets">
-                <button class="rep-preset-btn rom-preset-btn" type="button" data-rom-min="120" data-rom-max="150">120°–150°</button>
-                <button class="rep-preset-btn rom-preset-btn" type="button" data-rom-min="120" data-rom-max="165">120°–165°</button>
-                <button class="rep-preset-btn rom-preset-btn active" type="button" data-rom-min="120" data-rom-max="180">120°–180°</button>
+            <div class="flex-reps-row">
+              <div class="rep-presets" id="repPresets" aria-label="Quick rep count presets"></div>
+              <div class="rep-stepper">
+                <button class="circle-step-btn" id="repMinusBtn" type="button" aria-label="Decrease repetitions">−</button>
+                <div class="rep-value-box">
+                  <strong id="repTargetDisplay">12</strong>
+                  <span>REPS</span>
+                </div>
+                <button class="circle-step-btn" id="repPlusBtn" type="button" aria-label="Increase repetitions">+</button>
               </div>
             </div>
           </div>
-          <div class="tophub-kin-group">
-            <span class="tophub-kin-label" id="velInputLabel">Target Speed / Hold Angle</span>
-            <div class="tophub-kin-inputs">
-              <label class="tophub-num-label"><span id="velUnitText">Speed (°/s)</span>
-                <input class="tophub-num-input" id="targetVelInput" type="number" min="5" max="180" step="5" value="60" />
-              </label>
-              <button class="use-suggested-btn" id="applyKinematicsBtn" type="button">Sync to ESP</button>
-            </div>
+
+          <div class="flex-start-side">
+            <button class="primary-action-btn flex-start-cta" id="startWorkoutBtn" type="button">
+              Start Session <span aria-hidden="true">→</span>
+            </button>
+            <div class="setup-summary" id="setupSummary"></div>
           </div>
         </section>
 
-        <div class="setup-footer">
-          <div class="setup-summary" id="setupSummary"></div>
-          <button class="primary-action-btn" id="startWorkoutBtn" type="button">Start Session <span aria-hidden="true">→</span></button>
+        <!-- Quiet Collapsible Drawers for Technical Hardware & ROM Controls -->
+        <div class="advanced-drawers">
+          <details class="clean-disclosure" id="advancedKinematicsDisclosure">
+            <summary class="clean-disclosure-summary">
+              <span><strong>ROM &amp; Speed Settings</strong> · Default working range 120°–180°</span>
+              <span class="disclosure-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <div class="clean-disclosure-body tophub-kinematics-panel">
+              <div class="tophub-kin-group">
+                <span class="tophub-kin-label">Working ROM Window (120°–180°)</span>
+                <div class="tophub-kin-inputs">
+                  <label class="tophub-num-label">Min °
+                    <input class="tophub-num-input" id="romMinInput" type="number" min="120" max="170" step="1" value="120" />
+                  </label>
+                  <span class="tophub-kin-sep">to</span>
+                  <label class="tophub-num-label">Max °
+                    <input class="tophub-num-input" id="romMaxInput" type="number" min="130" max="180" step="1" value="180" />
+                  </label>
+                  <div class="rep-presets">
+                    <button class="rep-preset-btn rom-preset-btn" type="button" data-rom-min="120" data-rom-max="150">120°–150°</button>
+                    <button class="rep-preset-btn rom-preset-btn" type="button" data-rom-min="120" data-rom-max="165">120°–165°</button>
+                    <button class="rep-preset-btn rom-preset-btn active" type="button" data-rom-min="120" data-rom-max="180">120°–180°</button>
+                  </div>
+                </div>
+              </div>
+              <div class="tophub-kin-group">
+                <span class="tophub-kin-label" id="velInputLabel">Target Speed / Hold Angle</span>
+                <div class="tophub-kin-inputs">
+                  <label class="tophub-num-label"><span id="velUnitText">Speed (°/s)</span>
+                    <input class="tophub-num-input" id="targetVelInput" type="number" min="5" max="180" step="5" value="60" />
+                  </label>
+                  <button class="use-suggested-btn" id="applyKinematicsBtn" type="button">Sync to ESP</button>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="clean-disclosure" id="topHubHardwareCard" aria-label="Top-Hub ESP32 hardware status and calibration">
+            <summary class="clean-disclosure-summary">
+              <span class="hw-summary-left">
+                <strong id="topHubLinkTitle">Top-Hub Hardware &amp; Homing</strong>
+                <span class="clinical-flexion-chip" id="thLinkChip">ESP-NOW: Waiting…</span>
+                <span class="clinical-flexion-chip" id="thHomeChip">Home: Unhomed (H:0)</span>
+                <span class="clinical-flexion-chip" id="thAngleChip">θk: 0.0° (0.0°/s)</span>
+              </span>
+              <span class="disclosure-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <div class="clean-disclosure-body hw-drawer-body">
+              <div class="tophub-hw-actions">
+                <button class="mini-pill-btn" id="quickHomeBtn" type="button" title="Latch current arm angle as 0.0° full-park reference &amp; zero ACS712 current sensor">Set 0° Home</button>
+                <button class="mini-pill-btn" id="autoHomeBtn" type="button" title="Motorized seek toward STOP1 0° hard-stop (requires 24V power)">Auto-Home (STOP1)</button>
+                <button class="mini-pill-btn" id="parkHomeBtn" type="button" title="Slowly return arm from working range (120°–180°) back to 0° parked stop">Return to 0° Park</button>
+                <button class="mini-pill-btn" id="releaseLockBtn" type="button" title="Release electronic hard-stop or spasm lockout">Release Lock</button>
+              </div>
+              <div class="clinical-flexion-grid tophub-telemetry-chips">
+                <span class="clinical-flexion-chip" id="thPowerChip">Drive: 0.0 V · 0.00 A</span>
+                <span class="clinical-flexion-chip" id="thWorkChip">Last Rep Work: 0.00 J</span>
+              </div>
+              <div class="tophub-rom-meter" aria-hidden="true">
+                <div class="tophub-rom-fill" id="thAngleBarFill"></div>
+              </div>
+              <p class="tophub-hw-note" id="topHubStatusNote">Home at <strong>0° Home</strong>, keep clear while the arm moves slowly (<strong>10°/s</strong>) to <strong>120°</strong> start, then perform therapy in <strong>120°–180°</strong>.</p>
+            </div>
+          </details>
         </div>
       </section>
 
@@ -269,7 +279,7 @@
               </div>
 
               <div class="rep-test-controls" id="repTestControls">
-                <span class="rep-test-label">ESP TEST SIMULATOR</span>
+                <span class="rep-test-label">DEMO CONTROLS</span>
                 <div class="rep-test-btns">
                   <button class="mini-pill-btn" id="simRepBtn" type="button">+1 Rep Completed</button>
                   <button class="mini-pill-btn" id="autoSimToggleBtn" type="button">Pause Auto Demo</button>

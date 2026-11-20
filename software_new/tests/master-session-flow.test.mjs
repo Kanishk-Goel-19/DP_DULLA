@@ -92,10 +92,16 @@ test('master workflow: dashboard -> session selector -> cycling & flexion -> pro
     assert.match(selectorHtml, /Flexion/)
     assert.match(selectorHtml, /href="\/progress"/)
 
-    // 5. Cycling page serves HUD + Pause/Resume + End Session + See Progress
+    // 5. Cycling page serves 4-mode selector + HUD + Pause/Resume + End Session + See Progress
     const cyclingRes = await fetch(`${baseUrl}/device/cycling/`, { headers: { Cookie: cookieHeader(jar) } })
     assert.equal(cyclingRes.status, 200)
     const cyclingHtml = await cyclingRes.text()
+    assert.match(cyclingHtml, /id="cyclingSetupView"/)
+    assert.match(cyclingHtml, /Constant Torque/)
+    assert.match(cyclingHtml, /Constant Power/)
+    assert.match(cyclingHtml, /Isokinetic Cadence/)
+    assert.match(cyclingHtml, /Manual Control/)
+    assert.match(cyclingHtml, /id="startCyclingBtn"/)
     assert.match(cyclingHtml, /id="pauseResumeBtn"/)
     assert.match(cyclingHtml, /id="endSessionBtn"/)
     assert.match(cyclingHtml, /href="\/progress"/)

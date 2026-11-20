@@ -452,14 +452,8 @@
       suggestedRepCount.textContent = `${mode.suggestedReps} reps`;
     }
     if (setupSummary) {
-      const rxNote = state.clinicalRx?.flexion
-        ? ` · Clinical target: <strong>${state.targetTorque} N·m</strong>`
-        : ` · Target: <strong>${state.targetTorque} N·m</strong>`;
-      const velDesc = mode.key === "isometric"
-        ? `Hold <strong>${Math.round(state.targetVelDegS)}°</strong>`
-        : `<strong>${Math.round(state.targetVelDegS)}°/s</strong>`;
       setupSummary.innerHTML =
-        `Selected: <strong>${mode.title}</strong> (${mode.rolePillText}) · <strong>${state.targetReps} repetitions</strong> · ROM <strong>${state.romWindowDeg[0]}°–${state.romWindowDeg[1]}°</strong> · ${velDesc}${rxNote}`;
+        `<strong>${mode.title}</strong> · ${state.targetReps} reps · ${state.targetTorque} N·m`;
     }
   }
 
@@ -1430,27 +1424,11 @@
 
     if (clinicalFlexionCard) {
       clinicalFlexionCard.hidden = false;
-      const safetyNote = Array.isArray(rx.safetyLocks) && rx.safetyLocks.length
-        ? rx.safetyLocks[0]
-        : "";
-      const summaryText = rx.summary || fx.rationale || fx.secondaryNote || "";
       const displayTorque = MODE_CATALOG[recKey]?.defaultTarget ?? Number(fx.hardwareTorqueNm ?? fx.targetTorqueNm ?? 22);
       clinicalFlexionCard.innerHTML = `
-        <div class="clinical-flexion-top">
-          <div>
-            <span class="clinical-flexion-eyebrow">${escapeHtml(rx.phase)} · Automated Decision Tree</span>
-            <h2>Recommended: ${escapeHtml(fx.clinicalLabel)}</h2>
-          </div>
-          <a class="mini-pill-btn" href="/intake">Edit Clinical Intake</a>
-        </div>
-        <p class="clinical-flexion-summary">${escapeHtml(summaryText)}</p>
-        <div class="clinical-flexion-grid">
-          <span class="clinical-flexion-chip">Mode: ${escapeHtml(fx.modeName)}</span>
-          <span class="clinical-flexion-chip">Target Torque: ${displayTorque} N·m (${escapeHtml(fx.roleLabel)})</span>
-          <span class="clinical-flexion-chip">Repetitions: ${Number(fx.suggestedReps)} reps</span>
-          <span class="clinical-flexion-chip">Working ROM: ${workingRom[0]}°–${workingRom[1]}° · ${escapeHtml(fx.speedSpec)}</span>
-          ${safetyNote ? `<span class="clinical-flexion-chip warn">${escapeHtml(safetyNote)}</span>` : ""}
-        </div>
+        <span class="clinical-strip-badge">★ Clinical Suggestion</span>
+        <span><strong>${escapeHtml(fx.modeName)}</strong> · ${Number(fx.suggestedReps)} reps · ${displayTorque} N·m · ROM ${workingRom[0]}°–${workingRom[1]}°</span>
+        <a class="clinical-strip-link" href="/intake">Edit Intake</a>
       `;
     }
 
