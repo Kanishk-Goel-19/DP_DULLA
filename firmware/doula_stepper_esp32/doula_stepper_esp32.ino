@@ -24,10 +24,10 @@
 // ============================================================================
 // 1. PIN & STEPPER CONFIGURATION
 // ============================================================================
-constexpr int   DIR_PIN            = 19;     // Connected to DIR+
-constexpr int   STEP_PIN           = 18;     // Connected to PUL+
-constexpr uint8_t STEP_DIR_UP      = HIGH;   // Swap HIGH/LOW if '+' spins the wrong way
-constexpr uint8_t STEP_DIR_DOWN    = LOW;
+constexpr int   DIR_PIN            = 25;     // Connected to DIR+
+constexpr int   STEP_PIN           = 26;     // Connected to PUL+
+constexpr uint8_t STEP_DIR_UP      = LOW;   // Swap HIGH/LOW if '+' spins the wrong way
+constexpr uint8_t STEP_DIR_DOWN    = HIGH;
 
 // Step angle configuration:
 // Matches angle / 1.8 in full-step mode (200 steps/rev, 1:1 motor shaft).

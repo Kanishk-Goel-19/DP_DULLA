@@ -48,3 +48,16 @@ Flash [doula_stepper_esp32.ino](doula_stepper_esp32/doula_stepper_esp32.ino) to 
   - **`+` / `−`** (from website torque controls, Master Serial `+` / `-`, or Stepper Serial `+` / `-`) → moves `+1` / `-1` step and updates tracked `currentSteps` & `angleDeg`.
   - **End Session / E-Stop** (from website or `END` on Master/Stepper Serial) → returns smoothly back to `0.00°` (step `0`).
 - **Stepper Serial Monitor Commands (`115200` baud):** `+`, `-`, `START` (`s`), `END` (`e`), `HOME` (`0`), `ZERO`, `STATUS` (`?`).
+
+## 5. Standalone Multi-Mode Cycling Controller (`doula_cycling_modes/doula_cycling_modes.ino`)
+
+Flash [doula_cycling_modes.ino](doula_cycling_modes/doula_cycling_modes.ino) to `U3` (`ESP_CYCLING`) for standalone Serial-Monitor operation (`115200` baud) with `ENC2` quadrature encoder feedback:
+
+- **Wiring:** Stepper `DIR+` → `GPIO18`, `PUL+` → `GPIO19`, `PUL-/DIR-` → `GND` (`1.8°/step`, `1:6` gear `GBX2` = `0.30°/step`, `0..42°`); Encoder `ENC2` `OUT_A` → `GPIO32`, `OUT_B` → `GPIO33` (via `80 Ω` series damping + internal `INPUT_PULLUP`, `1440 CPR` flywheel / `7200` counts per pedal rev).
+- **4 Selectable Modes:**
+  - `manual` / `m0`: Base manual step mode (`start` → `22.5°`, `+`/`-` → `±1` step, `angle <deg>`, `end` → `0°`).
+  - `torque [Nm]` / `m1 [Nm]`: Constant Pedal Torque (`2..85 N·m`, `+`/`-` adjusts `±2 N·m`).
+  - `power [W]` / `m2 [W]`: Constant Power Ergometer (`15..250 W`, `+`/`-` adjusts `±10 W`).
+  - `isok [RPM]` / `m3 [RPM]`: Isokinetic Cadence-Clamping (`15..100 RPM`, `+`/`-` adjusts `±5 RPM`).
+- **Noise Immunity & Anti-Stall:** Hardware `PCNT` 4× decoding with `5.0 µs` glitch filter, per-tick delta spike rejection (`> 220` counts/`10 ms`), EMA velocity low-pass filter (`lpf`), Luenberger Momentum Disturbance Observer (`dob on|off`), `1.5 s` soft-start ramp, `5°` coasting unload standby, `30 °/s` slew limit, and NVS persistence (`save` / `resetcal`).
+- **Diagnostics & Tuning:** `status` (`?`), `enc`, `log [on|off]`, `plot`, `lpf <alpha>`, `dob on|off`, `encpol [1|-1]`, `keddy <val>`, `fric <c0> <bvisc>`, `pi <kp> <ki>`, `help`.
