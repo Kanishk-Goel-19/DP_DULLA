@@ -73,8 +73,32 @@ Ready-to-flash Arduino sketches for the three-node DOULA rehabilitation architec
 
 ## 5. Serial Monitor Commands (`115200` baud)
 
+<<<<<<< HEAD
+Flash [doula_stepper_esp32.ino](doula_stepper_esp32/doula_stepper_esp32.ino) to the second ESP32 (`U3` wired to `GPIO18 -> PUL+`, `GPIO19 -> DIR+`, `PUL-/DIR- -> GND`):
+
+- **Automatic ESP-NOW Pairing & Channel Sync:** `U1` (`doula_esp32s.ino`) broadcasts a `500 ms` sync heartbeat carrying its active Wi-Fi channel; `U3` scans channels `1–13`, locks onto `U1`, and pairs automatically without hardcoding MAC addresses.
+- **Session Lifecycle (`1.8°/step` full-step default):**
+  - **Start Cycling Session** (from website or `START` on Master/Stepper Serial) → moves to `22.5°` (`13` steps = `23.40°` at `1.8°/step`; adjust `MICROSTEPS` or `GEAR_RATIO` at the top of `doula_stepper_esp32.ino` if using microstepping or `1:6` gearing).
+  - **`+` / `−`** (from website torque controls, Master Serial `+` / `-`, or Stepper Serial `+` / `-`) → moves `+1` / `-1` step and updates tracked `currentSteps` & `angleDeg`.
+  - **End Session / E-Stop** (from website or `END` on Master/Stepper Serial) → returns smoothly back to `0.00°` (step `0`).
+- **Stepper Serial Monitor Commands (`115200` baud):** `+`, `-`, `START` (`s`), `END` (`e`), `HOME` (`0`), `ZERO`, `STATUS` (`?`).
+
+## 5. Standalone Multi-Mode Cycling Controller (`doula_cycling_modes/doula_cycling_modes.ino`)
+
+Flash [doula_cycling_modes.ino](doula_cycling_modes/doula_cycling_modes.ino) to `U3` (`ESP_CYCLING`) for standalone Serial-Monitor operation (`115200` baud) with `ENC2` quadrature encoder feedback:
+
+- **Wiring:** Stepper `DIR+` → `GPIO18`, `PUL+` → `GPIO19`, `PUL-/DIR-` → `GND` (`1.8°/step`, `1:6` gear `GBX2` = `0.30°/step`, `0..42°`); Encoder `ENC2` `OUT_A` → `GPIO32`, `OUT_B` → `GPIO33` (via `80 Ω` series damping + internal `INPUT_PULLUP`, `1440 CPR` flywheel / `7200` counts per pedal rev).
+- **4 Selectable Modes:**
+  - `manual` / `m0`: Base manual step mode (`start` → `22.5°`, `+`/`-` → `±1` step, `angle <deg>`, `end` → `0°`).
+  - `torque [Nm]` / `m1 [Nm]`: Constant Pedal Torque (`2..85 N·m`, `+`/`-` adjusts `±2 N·m`).
+  - `power [W]` / `m2 [W]`: Constant Power Ergometer (`15..250 W`, `+`/`-` adjusts `±10 W`).
+  - `isok [RPM]` / `m3 [RPM]`: Isokinetic Cadence-Clamping (`15..100 RPM`, `+`/`-` adjusts `±5 RPM`).
+- **Noise Immunity & Anti-Stall:** Hardware `PCNT` 4× decoding with `5.0 µs` glitch filter, per-tick delta spike rejection (`> 220` counts/`10 ms`), EMA velocity low-pass filter (`lpf`), Luenberger Momentum Disturbance Observer (`dob on|off`), `1.5 s` soft-start ramp, `5°` coasting unload standby, `30 °/s` slew limit, and NVS persistence (`save` / `resetcal`).
+- **Diagnostics & Tuning:** `status` (`?`), `enc`, `log [on|off]`, `plot`, `lpf <alpha>`, `dob on|off`, `encpol [1|-1]`, `keddy <val>`, `fric <c0> <bvisc>`, `pi <kp> <ki>`, `help`.
+=======
 - **`U1` (`doula_esp32s.ino`):**
   - Diagnostics & Live Stream: `HELP` (`?`), `STATUS` (`IP`), `NODES`, `STREAM` (`P` — toggles `5 Hz` live `U2` telemetry stream on USB Serial).
   - Top-Hub Homing & Modes: `HOME` / `ZERO` (`OP_SETUP_QUICK_6S` instant `0.0°` home), `AUTOHOME` / `CAL` / `SETUP` (`OP_SETUP_FULL_25S` motorized `STOP1` seek), `CPM [deg_s] [Nm]`, `ASSIST [deg_s] [Nm]`, `ISO [ext_Nm] [flex_Nm]`, `ISOK [deg_s] [cap_Nm]`, `ISOM [hold_deg] [cap_Nm]`, `ROM <min> <max>`, `SPEED <deg_s>`, `TORQUE <ext_Nm> [flex_Nm]`, `PWM <signed_pct>`, `BENCH`.
   - Lifecycle & Safety: `PAUSE`, `RESUME`, `STOP` (`END`), `ESTOP` (`LOCK`), `RELEASE` (`CLEAR`), `START`, `+`, `-`, `REP`.
 - **`U3` (`doula_stepper_esp32.ino`):** `+`, `-`, `START` (`s`), `END` (`e`), `HOME` (`0`), `ZERO`, `STATUS` (`?`).
+>>>>>>> 27ab21cfb38aebea385d87cf9a3a87dbd4fe94ba
