@@ -16,6 +16,22 @@ function num(value, fallback) {
   return Number.isFinite(n) ? n : fallback
 }
 
+export function mapAnatomicalToMachineRom(romExt = 0, romFlex = 60) {
+  const clamp = (v, lo, hi) => Math.min(Math.max(Math.round(Number(v) || 0), lo), hi)
+  const extOffset = clamp(romExt, 0, 40)
+  const flexSpan = clamp(romFlex, 10, 60)
+  const minDeg = clamp(120 + extOffset, 120, 170)
+  const maxDeg = clamp(120 + flexSpan, minDeg + 10, 180)
+  return [minDeg, maxDeg]
+}
+
+function pathologyToFirmwareCode(pathology) {
+  if (pathology === 'ACLR') return 1
+  if (pathology === 'TKA') return 2
+  if (pathology === 'PFPS') return 3
+  return 0
+}
+
 export function normalizeIntake(raw) {
   if (!raw || typeof raw !== 'object') throw new Error('Invalid clinical intake submission.')
   const pathology = Object.hasOwn(PATHOLOGIES, raw.pathology) ? raw.pathology : ''
@@ -377,6 +393,16 @@ function buildResult({
   cycling,
   bodyMassKg,
 }) {
+  const maxHwTorque = flexion.modeId === 'passive' || flexion.modeId === 'active_assist' ? 25 : 45
+  const enrichedFlexion = {
+    ...flexion,
+    recommendedMode: flexion.modeId,
+    machineRomWindowDeg: mapAnatomicalToMachineRom(flexion.romWindowDeg?.[0], flexion.romWindowDeg?.[1]),
+    hardwareTorqueNm: Math.min(flexion.targetTorqueNm, maxHwTorque),
+    targetVelDegS: flexion.modeId === 'passive' ? 18 : flexion.modeId === 'isokinetic' ? 45 : 60,
+    pathologyCode: pathologyToFirmwareCode(intake.pathology),
+    rationale: summary,
+  }
   return {
     protocolId,
     phase,
@@ -385,7 +411,7 @@ function buildResult({
     recommendedSession,
     decisionPath,
     safetyLocks,
-    flexion,
+    flexion: enrichedFlexion,
     cycling,
     geometry: {
       bodyMassKg,

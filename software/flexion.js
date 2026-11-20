@@ -34,8 +34,8 @@
       suggestedReps: 12,
       repPresets: [8, 10, 12, 15],
       minTorque: 5,
-      maxTorque: 68,
-      defaultTarget: 25,
+      maxTorque: 45,
+      defaultTarget: 22,
       defaultVel: 60,
       step: 2,
       simAmplitude: 3.4
@@ -53,8 +53,8 @@
       suggestedReps: 10,
       repPresets: [6, 8, 10, 12],
       minTorque: 10,
-      maxTorque: 68,
-      defaultTarget: 35,
+      maxTorque: 45,
+      defaultTarget: 30,
       defaultVel: 45,
       step: 2,
       simAmplitude: 5.0
@@ -93,7 +93,7 @@
       minTorque: 5,
       maxTorque: 45,
       defaultTarget: 20,
-      defaultVel: 60,
+      defaultVel: 150,
       step: 2,
       simAmplitude: 2.2
     }
@@ -114,13 +114,22 @@
     ended: false,
     estopped: false,
     autoSim: true,
+    deviceMode: "demo",
+    shouldConnectWs: false,
     espConnected: false,
     u2Linked: false,
     u2Homed: false,
     u2Calibrated: false,
     u2BusyHoming: false,
+    u2Positioning: false,
     u2HardStop: false,
     u2Spasm: false,
+    u2FaultLockout: false,
+    setupState: "idle",
+    setupWarning: false,
+    setupTargetDeg: 120,
+    unhomedPrompt: false,
+    lastSafetyMessage: "",
     kneeAngleDeg: 0,
     kneeVelDegS: 0,
     vbusVolts: 0,
@@ -128,7 +137,7 @@
     lastRepWorkJ: 0,
     wsUrl: null,
     clinicalRx: null,
-    romWindowDeg: [0, 110],
+    romWindowDeg: [120, 180],
     targetVelDegS: 60,
     dOffsetM: 0.250,
     lLegM: 0.300,
@@ -156,6 +165,7 @@
   const topHubLinkTitle = document.getElementById("topHubLinkTitle");
   const quickHomeBtn = document.getElementById("quickHomeBtn");
   const autoHomeBtn = document.getElementById("autoHomeBtn");
+  const parkHomeBtn = document.getElementById("parkHomeBtn");
   const releaseLockBtn = document.getElementById("releaseLockBtn");
   const thLinkChip = document.getElementById("thLinkChip");
   const thHomeChip = document.getElementById("thHomeChip");
@@ -164,6 +174,21 @@
   const thWorkChip = document.getElementById("thWorkChip");
   const thAngleBarFill = document.getElementById("thAngleBarFill");
   const topHubStatusNote = document.getElementById("topHubStatusNote");
+
+  // Safety / Setup Transition Banner References
+  const setupWarningBanner = document.getElementById("setupWarningBanner");
+  const setupBannerBadge = document.getElementById("setupBannerBadge");
+  const setupBannerTitle = document.getElementById("setupBannerTitle");
+  const setupBannerMessage = document.getElementById("setupBannerMessage");
+  const setupBannerProgressWrap = document.getElementById("setupBannerProgressWrap");
+  const setupBannerProgressFill = document.getElementById("setupBannerProgressFill");
+  const setupBannerProgressText = document.getElementById("setupBannerProgressText");
+  const beginExerciseBtn = document.getElementById("beginExerciseBtn");
+  const cancelSetupBtn = document.getElementById("cancelSetupBtn");
+  const bannerQuickHomeBtn = document.getElementById("bannerQuickHomeBtn");
+  const bannerAutoHomeBtn = document.getElementById("bannerAutoHomeBtn");
+  const bannerReleaseBtn = document.getElementById("bannerReleaseBtn");
+  const bannerHardStopBtn = document.getElementById("bannerHardStopBtn");
 
   const setupView = document.getElementById("setupView");
   const activeView = document.getElementById("activeView");
@@ -204,6 +229,7 @@
   const bannerTitle = document.getElementById("bannerTitle");
   const bannerMessage = document.getElementById("bannerMessage");
   const repeatSessionBtn = document.getElementById("repeatSessionBtn");
+  const completeParkBtn = document.getElementById("completeParkBtn");
   const chooseAnotherModeBtn = document.getElementById("chooseAnotherModeBtn");
   const repTestControls = document.getElementById("repTestControls");
   const simRepBtn = document.getElementById("simRepBtn");
@@ -347,10 +373,25 @@
     });
   }
 
+  function normalizeWorkingRom(rawMin, rawMax) {
+    const rMinRaw = Number.isFinite(Number(rawMin)) ? Math.round(Number(rawMin)) : 120;
+    const rMin = clamp(rMinRaw, 120, 170);
+    const rMaxRaw = Number.isFinite(Number(rawMax)) ? Math.round(Number(rawMax)) : 180;
+    const rMax = clamp(rMaxRaw, rMin + 10, 180);
+    return [rMin, rMax];
+  }
+
+  function mapAnatomicalToMachineRom(romExt, romFlex) {
+    const extOffset = clamp(Math.round(Number(romExt) || 0), 0, 40);
+    const flexSpan = clamp(Math.round(Number(romFlex) || 60), 10, 60);
+    const minDeg = clamp(120 + extOffset, 120, 170);
+    const maxDeg = clamp(120 + flexSpan, minDeg + 10, 180);
+    return [minDeg, maxDeg];
+  }
+
   function syncKinematicsInputs() {
     const mode = currentMode();
-    const rMin = clamp(Math.round(Number(state.romWindowDeg[0]) || 0), 0, 170);
-    const rMax = clamp(Math.round(Number(state.romWindowDeg[1]) || 110), rMin + 10, 180);
+    const [rMin, rMax] = normalizeWorkingRom(state.romWindowDeg[0], state.romWindowDeg[1]);
     state.romWindowDeg = [rMin, rMax];
     if (romMinInput) romMinInput.value = String(rMin);
     if (romMaxInput) romMaxInput.value = String(rMax);
@@ -371,9 +412,21 @@
       if (mode.key === "isometric") {
         velInputLabel.textContent = "Isometric Lock Angle";
         velUnitText.textContent = "Hold Angle (°)";
+        state.targetVelDegS = clamp(Math.round(Number(state.targetVelDegS) || 150), rMin, rMax);
+        if (targetVelInput) {
+          targetVelInput.min = String(rMin);
+          targetVelInput.max = String(rMax);
+          targetVelInput.step = "1";
+        }
       } else {
         velInputLabel.textContent = "Target Angular Velocity";
         velUnitText.textContent = "Speed (°/s)";
+        state.targetVelDegS = clamp(Math.round(Number(state.targetVelDegS) || mode.defaultVel), 5, 180);
+        if (targetVelInput) {
+          targetVelInput.min = "5";
+          targetVelInput.max = "180";
+          targetVelInput.step = "5";
+        }
       }
     }
     if (targetVelInput) {
@@ -447,6 +500,133 @@
     }
   }
 
+  function renderSafetyBanner() {
+    if (!setupWarningBanner) return;
+
+    if (setupBannerProgressWrap) setupBannerProgressWrap.hidden = true;
+    if (beginExerciseBtn) beginExerciseBtn.hidden = true;
+    if (cancelSetupBtn) cancelSetupBtn.hidden = true;
+    if (bannerQuickHomeBtn) bannerQuickHomeBtn.hidden = true;
+    if (bannerAutoHomeBtn) bannerAutoHomeBtn.hidden = true;
+    if (bannerReleaseBtn) bannerReleaseBtn.hidden = true;
+    if (bannerHardStopBtn) bannerHardStopBtn.hidden = true;
+    setupWarningBanner.className = "setup-safety-banner";
+
+    if (state.estopped || state.u2HardStop) {
+      setupWarningBanner.hidden = false;
+      setupWarningBanner.classList.add("is-spasm");
+      if (setupBannerBadge) setupBannerBadge.textContent = "HARD STOP";
+      if (setupBannerTitle) setupBannerTitle.textContent = "HARD STOP ENGAGED — MOTOR DISABLED";
+      if (setupBannerMessage) {
+        setupBannerMessage.textContent = state.lastSafetyMessage ||
+          "Emergency Hard-Stop is active and motor drive is disabled. Verify limb/mechanical clearance before clicking Release Lock.";
+      }
+      if (bannerReleaseBtn) bannerReleaseBtn.hidden = false;
+      return;
+    }
+
+    if (state.u2Spasm || state.u2FaultLockout) {
+      setupWarningBanner.hidden = false;
+      setupWarningBanner.classList.add("is-spasm");
+      if (setupBannerBadge) setupBannerBadge.textContent = state.u2Spasm ? "SPASM GUARD" : "SAFETY FAULT";
+      if (setupBannerTitle) {
+        setupBannerTitle.textContent = state.u2Spasm
+          ? "SPASM / OBSTRUCTION DETECTED — MOTOR RELEASED"
+          : "TOP-HUB SAFETY FAULT — MOTOR RELEASED";
+      }
+      if (setupBannerMessage) {
+        setupBannerMessage.textContent = state.lastSafetyMessage ||
+          "Top-Hub safely stopped the drive into zero-torque IDLE. Check patient comfort and clearance, then click Release Lock to clear the alert.";
+      }
+      if (bannerReleaseBtn) bannerReleaseBtn.hidden = false;
+      return;
+    }
+
+    const isMovingSetup = state.setupWarning ||
+      state.setupState === "moving_to_start" ||
+      state.setupState === "parking_home" ||
+      state.setupState === "autohoming" ||
+      state.u2BusyHoming ||
+      state.u2Positioning;
+
+    if (isMovingSetup) {
+      const isPark = state.setupState === "parking_home";
+      const isAutoHome = state.setupState === "autohoming" || state.u2BusyHoming;
+      setupWarningBanner.hidden = false;
+      setupWarningBanner.classList.add("is-warning");
+      if (setupBannerBadge) setupBannerBadge.textContent = "KEEP CLEAR · 10°/s";
+      if (setupBannerTitle) {
+        setupBannerTitle.textContent = isPark
+          ? "⚠️ RETURNING TO 0° PARK — PLEASE STAY AWAY"
+          : (isAutoHome
+            ? "⚠️ AUTO-HOMING TO 0° STOP — PLEASE STAY AWAY"
+            : "⚠️ SETUP IN PROGRESS — PLEASE STAY AWAY");
+      }
+      if (setupBannerMessage) {
+        setupBannerMessage.textContent = isPark
+          ? "Arm is slowly returning to the 0° parked stop at 10°/s. Keep hands, feet, and straps clear until it stops and releases."
+          : (isAutoHome
+            ? "Arm is slowly seeking the 0° STOP1 mechanical home reference. Keep limbs and obstacles clear."
+            : `Setup in progress — arm is moving slowly at 10°/s from ${state.kneeAngleDeg.toFixed(1)}° to ${Math.round(state.setupTargetDeg || state.romWindowDeg[0])}°. Do NOT place your leg yet — please stay away!`);
+      }
+      if (setupBannerProgressWrap && setupBannerProgressFill && setupBannerProgressText) {
+        setupBannerProgressWrap.hidden = false;
+        if (isPark || isAutoHome) {
+          const spanRef = Math.max(1, state.romWindowDeg[0] || 120);
+          const ratio = clamp(1 - (state.kneeAngleDeg / spanRef), 0, 1);
+          setupBannerProgressFill.style.width = `${(ratio * 100).toFixed(1)}%`;
+          setupBannerProgressText.textContent = `${state.kneeAngleDeg.toFixed(1)}° → 0.0°`;
+        } else {
+          const targetRef = Math.max(1, state.setupTargetDeg || state.romWindowDeg[0] || 120);
+          const ratio = clamp(state.kneeAngleDeg / targetRef, 0, 1);
+          setupBannerProgressFill.style.width = `${(ratio * 100).toFixed(1)}%`;
+          setupBannerProgressText.textContent = `${state.kneeAngleDeg.toFixed(1)}° → ${targetRef.toFixed(1)}°`;
+        }
+      }
+      if (cancelSetupBtn) {
+        cancelSetupBtn.hidden = false;
+        cancelSetupBtn.textContent = "Stop & Release";
+      }
+      if (bannerHardStopBtn) bannerHardStopBtn.hidden = false;
+      return;
+    }
+
+    if (state.setupState === "ready_at_start") {
+      setupWarningBanner.hidden = false;
+      setupWarningBanner.classList.add("is-ready");
+      if (setupBannerBadge) setupBannerBadge.textContent = "READY FOR LEG";
+      if (setupBannerTitle) {
+        setupBannerTitle.textContent = `✓ Starting Position Reached (${Math.round(state.romWindowDeg[0])}°)`;
+      }
+      if (setupBannerMessage) {
+        setupBannerMessage.textContent =
+          "Arm is holding gently at the extended starting position. Place your leg securely on the shin pad, then click Begin Exercise.";
+      }
+      if (beginExerciseBtn) beginExerciseBtn.hidden = false;
+      if (cancelSetupBtn) {
+        cancelSetupBtn.hidden = false;
+        cancelSetupBtn.textContent = "Cancel & Release";
+      }
+      return;
+    }
+
+    if (state.unhomedPrompt && state.espConnected && state.u2Linked && !state.u2Homed) {
+      setupWarningBanner.hidden = false;
+      setupWarningBanner.classList.add("is-unhomed");
+      if (setupBannerBadge) setupBannerBadge.textContent = "HOMING REQUIRED";
+      if (setupBannerTitle) setupBannerTitle.textContent = "Top-Hub Homing Required (H:0)";
+      if (setupBannerMessage) {
+        setupBannerMessage.textContent =
+          "Home the Top-Hub at the 0° mechanical stop before starting therapy so the arm knows its exact angle and never overdrives.";
+      }
+      if (bannerQuickHomeBtn) bannerQuickHomeBtn.hidden = false;
+      if (bannerAutoHomeBtn) bannerAutoHomeBtn.hidden = false;
+      return;
+    }
+
+    setupWarningBanner.hidden = true;
+  }
+
   function updateTopHubHardwareBar() {
     if (thLinkChip) {
       if (!state.espConnected) {
@@ -468,9 +648,21 @@
       } else if (state.u2Spasm) {
         thHomeChip.textContent = "Safety: Spasm Guard Active";
         thHomeChip.className = "clinical-flexion-chip warn";
-      } else if (state.u2BusyHoming) {
-        thHomeChip.textContent = "Home: Homing in progress…";
+      } else if (state.u2FaultLockout) {
+        thHomeChip.textContent = "Safety: Fault Lockout";
         thHomeChip.className = "clinical-flexion-chip warn";
+      } else if (state.u2BusyHoming || state.setupState === "autohoming") {
+        thHomeChip.textContent = "Home: Auto-Homing (Stay Away)…";
+        thHomeChip.className = "clinical-flexion-chip warn";
+      } else if (state.setupState === "parking_home") {
+        thHomeChip.textContent = "Setup: Returning to 0° Park…";
+        thHomeChip.className = "clinical-flexion-chip warn";
+      } else if (state.u2Positioning || state.setupState === "moving_to_start" || state.setupWarning) {
+        thHomeChip.textContent = "Setup: Positioning to 120°…";
+        thHomeChip.className = "clinical-flexion-chip warn";
+      } else if (state.setupState === "ready_at_start") {
+        thHomeChip.textContent = "Setup: Ready at Start (Place Leg)";
+        thHomeChip.className = "clinical-flexion-chip ok";
       } else if (state.u2Homed) {
         thHomeChip.textContent = "Home: Latch Ready (H:1)";
         thHomeChip.className = "clinical-flexion-chip ok";
@@ -494,8 +686,7 @@
     }
 
     if (thAngleBarFill) {
-      const span = Math.max(15, (state.romWindowDeg[1] || 110) - (state.romWindowDeg[0] || 0));
-      const pct = clamp(((state.kneeAngleDeg - (state.romWindowDeg[0] || 0)) / span) * 100, 0, 100);
+      const pct = clamp((state.kneeAngleDeg / 180) * 100, 0, 100);
       thAngleBarFill.style.width = `${pct.toFixed(1)}%`;
     }
 
@@ -504,6 +695,23 @@
       hardStopBtn.textContent = locked ? "Release Hard Stop" : "Hard Stop";
       hardStopBtn.classList.toggle("engaged", locked);
     }
+
+    if (pauseSessionBtn) {
+      const inSetup = state.setupState === "moving_to_start" ||
+        state.setupState === "ready_at_start" ||
+        state.setupState === "parking_home" ||
+        state.setupState === "autohoming";
+      pauseSessionBtn.disabled = inSetup;
+      if (state.setupState === "moving_to_start") {
+        pauseSessionBtn.textContent = "Positioning Arm…";
+      } else if (state.setupState === "ready_at_start") {
+        pauseSessionBtn.textContent = "Click Begin Exercise Above";
+      } else {
+        pauseSessionBtn.textContent = (state.paused || state.estopped) ? "Resume Session" : "Pause Session";
+      }
+    }
+
+    renderSafetyBanner();
   }
 
   function updateCountdownUI() {
@@ -535,9 +743,10 @@
 
     if (done && !state.ended) {
       state.ended = true;
+      state.paused = true;
       if (bannerTitle) bannerTitle.textContent = "Session Complete";
       if (bannerMessage) {
-        bannerMessage.textContent = `Completed ${state.completedReps} of ${state.targetReps} repetitions in ${currentMode().title}.`;
+        bannerMessage.textContent = `Completed ${state.completedReps} of ${state.targetReps} repetitions in ${currentMode().title}. Motor torque released — remove your leg before clicking Return to 0° Park.`;
       }
       setOdometerValue(0);
       sendEspCommand({ type: "stop_session", reason: "reps_complete" });
@@ -658,9 +867,10 @@
     const rawMax = maxEl ? Number(maxEl.value) : state.romWindowDeg[1];
     const rawVel = targetVelInput ? Number(targetVelInput.value) : state.targetVelDegS;
 
-    const rMin = clamp(Number.isFinite(rawMin) ? Math.round(rawMin) : 0, 0, 170);
-    const rMax = clamp(Number.isFinite(rawMax) ? Math.round(rawMax) : 110, rMin + 10, 180);
-    const vel = clamp(Number.isFinite(rawVel) ? Math.round(rawVel) : mode.defaultVel, 5, 180);
+    const [rMin, rMax] = normalizeWorkingRom(rawMin, rawMax);
+    const vel = mode.key === "isometric"
+      ? clamp(Number.isFinite(rawVel) ? Math.round(rawVel) : 150, rMin, rMax)
+      : clamp(Number.isFinite(rawVel) ? Math.round(rawVel) : mode.defaultVel, 5, 180);
 
     state.romWindowDeg = [rMin, rMax];
     state.targetVelDegS = vel;
@@ -673,8 +883,8 @@
       const sent = sendEspCommand(buildSetParamsPayload("kinematics_update"));
       if (topHubStatusNote) {
         topHubStatusNote.innerHTML = sent
-          ? `Synced ROM <strong>${rMin}°–${rMax}°</strong> &amp; speed <strong>${vel}°/s</strong> to Master ESP32 → Top-Hub U2.`
-          : `Updated ROM <strong>${rMin}°–${rMax}°</strong> &amp; speed <strong>${vel}°/s</strong> locally.`;
+          ? `Synced ROM <strong>${rMin}°–${rMax}°</strong> &amp; ${mode.key === "isometric" ? "hold" : "speed"} <strong>${vel}${mode.key === "isometric" ? "°" : "°/s"}</strong> to Master ESP32 → Top-Hub U2.`
+          : `Updated ROM <strong>${rMin}°–${rMax}°</strong> &amp; ${mode.key === "isometric" ? "hold" : "speed"} <strong>${vel}${mode.key === "isometric" ? "°" : "°/s"}</strong> locally.`;
       }
       if (espCommandStatus && state.active) {
         espCommandStatus.textContent = sent
@@ -687,8 +897,9 @@
   function updateFromESP(packet) {
     if (!packet || typeof packet !== "object") return;
 
-    if (packet.type === "status") {
+    if (packet.type === "esp_status" || packet.type === "status") {
       if (packet.connected === false) {
+        state.u2Linked = false;
         updateConnectionUI(false, "● DEMO — ESP32 OFFLINE");
         if (topHubStatusNote && packet.message) {
           topHubStatusNote.textContent = packet.message;
@@ -701,6 +912,9 @@
 
     if (packet.type === "esp_ack") {
       const msg = packet.message || (packet.forwarded === false ? "ESP32 not connected." : "Command acknowledged by Master ESP32.");
+      if (packet.severity === "spasm" || packet.severity === "fault" || packet.severity === "warning") {
+        state.lastSafetyMessage = msg;
+      }
       if (topHubStatusNote) {
         topHubStatusNote.textContent = msg;
       }
@@ -709,18 +923,19 @@
       }
       if (packet.forwarded === false) {
         updateConnectionUI(false, "● DEMO — ESP32 OFFLINE");
+      } else {
+        renderSafetyBanner();
       }
       return;
     }
 
-    // Always process hardware link & sensor telemetry even on Setup view or while paused
-    updateConnectionUI(true, state.u2Linked ? "● LIVE — TOP-HUB U2 LINKED" : "● LIVE — MASTER ESP32");
-
+    // Parse all Top-Hub & setup state flags BEFORE updating badges
     if (packet.u2_linked !== undefined) {
       state.u2Linked = Number(packet.u2_linked) === 1;
     }
     if (packet.homed !== undefined) {
       state.u2Homed = Number(packet.homed) === 1;
+      if (state.u2Homed) state.unhomedPrompt = false;
     }
     if (packet.calibrated !== undefined) {
       state.u2Calibrated = Number(packet.calibrated) === 1;
@@ -728,11 +943,26 @@
     if (packet.busy_homing !== undefined) {
       state.u2BusyHoming = Number(packet.busy_homing) === 1;
     }
+    if (packet.positioning !== undefined) {
+      state.u2Positioning = Number(packet.positioning) === 1;
+    }
     if (packet.hardstop_locked !== undefined) {
       state.u2HardStop = Number(packet.hardstop_locked) === 1;
     }
     if (packet.spasm !== undefined) {
       state.u2Spasm = Number(packet.spasm) === 1;
+    }
+    if (packet.fault_lockout !== undefined) {
+      state.u2FaultLockout = Number(packet.fault_lockout) === 1;
+    }
+    if (typeof packet.setup_state === "string" && packet.setup_state.length > 0) {
+      state.setupState = packet.setup_state;
+    }
+    if (packet.setup_warning !== undefined) {
+      state.setupWarning = Number(packet.setup_warning) === 1;
+    }
+    if (Number.isFinite(Number(packet.setup_target_deg))) {
+      state.setupTargetDeg = Number(packet.setup_target_deg);
     }
     if (Number.isFinite(Number(packet.knee_angle_deg))) {
       state.kneeAngleDeg = Number(packet.knee_angle_deg);
@@ -750,13 +980,18 @@
       state.lastRepWorkJ = Number(packet.last_rep_work_j);
     }
 
+    if (!state.u2Spasm && !state.u2FaultLockout && !state.u2HardStop && !state.estopped) {
+      state.lastSafetyMessage = "";
+    }
+
     const nowMs = Date.now();
     if (nowMs - state.lastLocalKinSetMs > 1200) {
       let kinUpdated = false;
       if (Number.isFinite(Number(packet.rom_min_deg)) && Number.isFinite(Number(packet.rom_max_deg))) {
         const pMin = Math.round(Number(packet.rom_min_deg));
         const pMax = Math.round(Number(packet.rom_max_deg));
-        if (pMax > pMin + 5 && (pMin !== state.romWindowDeg[0] || pMax !== state.romWindowDeg[1])) {
+        if (pMin >= 120 && pMax <= 180 && pMax >= pMin + 10 &&
+            (pMin !== state.romWindowDeg[0] || pMax !== state.romWindowDeg[1])) {
           state.romWindowDeg = [pMin, pMax];
           kinUpdated = true;
         }
@@ -781,7 +1016,7 @@
         state.paused = true;
         setOdometerValue(0);
         if (espCommandStatus) {
-          espCommandStatus.textContent = "HARD STOP engaged on Top-Hub. Click Release Hard Stop or Resume Session to unlock.";
+          espCommandStatus.textContent = "HARD STOP engaged on Top-Hub. Click Release Lock or Resume Session to unlock.";
         }
       } else if (!nextEstop && state.estopped) {
         state.estopped = false;
@@ -791,9 +1026,24 @@
       }
     }
 
-    updateTopHubHardwareBar();
+    // Update connection indicator AFTER U2 link & safety state are current
+    updateConnectionUI(true, state.u2Linked ? "● LIVE — TOP-HUB U2 LINKED" : "● LIVE — MASTER ESP32");
 
     if (!state.active || state.ended) return;
+
+    if (packet.paused !== undefined) {
+      state.paused = Boolean(Number(packet.paused));
+    }
+    if (state.u2Spasm || state.u2FaultLockout) {
+      state.paused = true;
+      setOdometerValue(0);
+      if (espCommandStatus) {
+        espCommandStatus.textContent = state.u2Spasm
+          ? "Spasm guard triggered — motor released to zero-torque IDLE. Click Release Lock."
+          : "Top-Hub safety fault — motor released to IDLE. Click Release Lock.";
+      }
+    }
+    updateTopHubHardwareBar();
 
     const mode = currentMode();
     let incomingTorque = null;
@@ -814,7 +1064,9 @@
       updateTargetTorqueUI();
     }
 
-    if (!state.paused && !state.estopped) {
+    const inActiveTherapy = !state.paused && !state.estopped &&
+      (state.setupState === "idle" || state.setupState === "");
+    if (inActiveTherapy) {
       if (Number.isFinite(Number(packet.completed_reps))) {
         const nextCompleted = clamp(Math.round(Number(packet.completed_reps)), 0, state.targetReps);
         if (nextCompleted !== state.completedReps) {
@@ -852,6 +1104,10 @@
   }
 
   function connectEspSocket() {
+    if (!state.shouldConnectWs) {
+      updateConnectionUI(false);
+      return;
+    }
     const url = resolveWsUrl();
     if (!url) {
       updateConnectionUI(false);
@@ -893,7 +1149,9 @@
 
     socket.onclose = () => {
       updateConnectionUI(false);
-      reconnectTimer = setTimeout(connectEspSocket, 3500);
+      if (state.shouldConnectWs) {
+        reconnectTimer = setTimeout(connectEspSocket, 3500);
+      }
     };
   }
 
@@ -954,11 +1212,37 @@
   }
 
   function startSession() {
+    applyKinematicsFromInputs(false, false);
+
+    if (state.espConnected && state.u2Linked && !state.u2Homed) {
+      state.unhomedPrompt = true;
+      if (topHubStatusNote) {
+        topHubStatusNote.textContent = "Top-Hub is unhomed (H:0). Use Set 0° Home or Auto-Home (STOP1) before starting therapy.";
+      }
+      renderSafetyBanner();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
     const mode = currentMode();
+    const needsSlowSetup = Boolean(
+      state.espConnected &&
+      state.u2Linked &&
+      (state.kneeAngleDeg < state.romWindowDeg[0] - 4 ||
+       state.kneeAngleDeg > state.romWindowDeg[1] + 4)
+    );
+
+    state.unhomedPrompt = false;
     state.active = true;
-    state.paused = false;
+    state.paused = needsSlowSetup;
     state.ended = false;
     state.estopped = false;
+    state.u2Spasm = false;
+    state.u2FaultLockout = false;
+    state.lastSafetyMessage = "";
+    state.setupState = needsSlowSetup ? "moving_to_start" : "idle";
+    state.setupWarning = needsSlowSetup;
+    state.setupTargetDeg = state.romWindowDeg[0];
     state.completedReps = 0;
     state.peakTorque = 0;
     state.torqueSum = 0;
@@ -969,6 +1253,10 @@
     state.sessionSaved = false;
     state.savingSession = false;
     state.lastSavePayload = null;
+
+    if (!state.espConnected || !state.u2Linked) {
+      state.kneeAngleDeg = state.romWindowDeg[0];
+    }
 
     if (saveFeedback) saveFeedback.hidden = true;
     if (setupView) setupView.hidden = true;
@@ -990,17 +1278,20 @@
     if (setpointLabel) {
       setpointLabel.textContent = mode.setpointLabel;
     }
-    if (pauseSessionBtn) {
-      pauseSessionBtn.textContent = "Pause Session";
-    }
     if (espCommandStatus) {
-      espCommandStatus.textContent = `Active ${mode.title}: ${mode.role} target ${state.targetTorque} N·m (${state.romWindowDeg[0]}°–${state.romWindowDeg[1]}°).`;
+      espCommandStatus.textContent = needsSlowSetup
+        ? `Setup in progress — moving arm slowly (10°/s) to ${state.romWindowDeg[0]}° start. Please stay away!`
+        : `Active ${mode.title}: ${mode.role} target ${state.targetTorque} N·m (${state.romWindowDeg[0]}°–${state.romWindowDeg[1]}°).`;
     }
     if (activeTorqueRec) {
       if (state.clinicalRx?.flexion) {
         const fx = state.clinicalRx.flexion;
+        const rxRom = Array.isArray(fx.machineRomWindowDeg)
+          ? normalizeWorkingRom(fx.machineRomWindowDeg[0], fx.machineRomWindowDeg[1])
+          : mapAnatomicalToMachineRom(fx.romWindowDeg?.[0], fx.romWindowDeg?.[1]);
+        const rxTorque = clamp(Math.round(Number(fx.hardwareTorqueNm ?? fx.targetTorqueNm) || state.targetTorque), mode.minTorque, mode.maxTorque);
         activeTorqueRec.hidden = false;
-        activeTorqueRec.textContent = `Recommended for your intake (${state.clinicalRx.phase}): ${fx.targetTorqueNm} N·m · ROM ${fx.romWindowDeg[0]}°–${fx.romWindowDeg[1]}°`;
+        activeTorqueRec.textContent = `Recommended for your intake (${state.clinicalRx.phase}): ${rxTorque} N·m · ROM ${rxRom[0]}°–${rxRom[1]}°`;
       } else {
         activeTorqueRec.hidden = true;
       }
@@ -1008,10 +1299,10 @@
 
     updateTargetTorqueUI();
     updateCountdownUI();
-    setOdometerValue(mode.defaultTarget * 0.45);
+    setOdometerValue(needsSlowSetup ? 0 : mode.defaultTarget * 0.45);
     updateTopHubHardwareBar();
 
-    connectEspSocket();
+    if (state.shouldConnectWs) connectEspSocket();
     sendEspCommand(buildStartSessionPayload());
     startDemoLoop();
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1024,6 +1315,8 @@
     state.active = false;
     state.paused = false;
     state.ended = false;
+    state.setupState = "idle";
+    state.setupWarning = false;
     clearInterval(simTimer);
     sendEspCommand({ type: "stop_session", reason: "return_to_setup" });
 
@@ -1044,36 +1337,33 @@
   }
 
   async function persistCompletedSession(outcome) {
-    if (state.sessionSaved || state.savingSession) return;
+    if (state.sessionSaved || state.savingSession || state.completedReps < 1) return;
     const mode = currentMode();
     const durationSec = state.startedAtMs > 0
       ? Math.max(1, Math.round((Date.now() - state.startedAtMs) / 1000))
-      : 0;
+      : 1;
     const avgTorqueNm = state.torqueSamples > 0
       ? Number((state.torqueSum / state.torqueSamples).toFixed(1))
       : state.targetTorque;
     const peakTorqueNm = Number(Math.max(state.peakTorque, state.targetTorque).toFixed(1));
+    const progressSource = (state.espConnected && state.u2Linked)
+      ? "esp32"
+      : (state.deviceMode === "connected" ? "connected-preview" : "demo");
 
     const payload = state.lastSavePayload || {
-      type: "flexion",
-      mode: mode.key,
-      modeTitle: mode.title,
-      role: mode.role,
-      completedReps: state.completedReps,
-      targetReps: state.targetReps,
-      targetTorqueNm: state.targetTorque,
-      avgTorqueNm,
-      peakTorqueNm,
-      durationSec,
-      romMinDeg: state.romWindowDeg[0],
-      romMaxDeg: state.romWindowDeg[1],
+      type: mode.role === "support" ? "Support" : "Resistance",
+      mode: mode.title,
+      torqueNm: avgTorqueNm,
+      reps: clamp(Math.round(state.completedReps), 1, 99),
+      durationSeconds: durationSec,
+      source: progressSource,
       outcome: outcome || "completed"
     };
     state.lastSavePayload = payload;
     state.savingSession = true;
 
     try {
-      const res = await fetch("/api/sessions", {
+      const res = await fetch("/api/progress", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -1101,32 +1391,37 @@
     if (!rx || !rx.flexion) return;
     state.clinicalRx = rx;
     const fx = rx.flexion;
+    const recKey = fx.modeId || fx.recommendedMode || "isotonic";
 
-    if (Array.isArray(fx.romWindowDeg) && fx.romWindowDeg.length === 2) {
-      state.romWindowDeg = [Number(fx.romWindowDeg[0]) || 0, Number(fx.romWindowDeg[1]) || 110];
-    }
+    const workingRom = Array.isArray(fx.machineRomWindowDeg) && fx.machineRomWindowDeg.length === 2
+      ? normalizeWorkingRom(fx.machineRomWindowDeg[0], fx.machineRomWindowDeg[1])
+      : (Array.isArray(fx.romWindowDeg) && fx.romWindowDeg.length === 2
+        ? mapAnatomicalToMachineRom(fx.romWindowDeg[0], fx.romWindowDeg[1])
+        : [120, 180]);
+    state.romWindowDeg = workingRom;
+
     if (Number.isFinite(Number(fx.targetVelDegS)) && Number(fx.targetVelDegS) > 0) {
       state.targetVelDegS = Number(fx.targetVelDegS);
     }
-    if (Number.isFinite(Number(fx.dOffsetM)) && Number(fx.dOffsetM) > 0) {
-      state.dOffsetM = Number(fx.dOffsetM);
-    }
     if (Number.isFinite(Number(fx.lLegM)) && Number(fx.lLegM) >= 0.15) {
       state.lLegM = Number(fx.lLegM);
+    } else if (Number.isFinite(Number(rx.geometry?.lLegCm)) && Number(rx.geometry.lLegCm) >= 15) {
+      state.lLegM = Number((Number(rx.geometry.lLegCm) / 100).toFixed(3));
     }
     if (Number.isFinite(Number(fx.pathologyCode))) {
       state.pathologyCode = Number(fx.pathologyCode);
     }
 
-    if (MODE_CATALOG[fx.recommendedMode]) {
-      const recMode = MODE_CATALOG[fx.recommendedMode];
+    if (MODE_CATALOG[recKey]) {
+      const recMode = MODE_CATALOG[recKey];
+      const hwTorque = Number(fx.hardwareTorqueNm ?? fx.targetTorqueNm);
       recMode.suggestedReps = clamp(Number(fx.suggestedReps) || recMode.suggestedReps, 1, 50);
-      recMode.defaultTarget = clamp(Number(fx.targetTorqueNm) || recMode.defaultTarget, recMode.minTorque, recMode.maxTorque);
+      recMode.defaultTarget = clamp(Number.isFinite(hwTorque) ? Math.round(hwTorque) : recMode.defaultTarget, recMode.minTorque, recMode.maxTorque);
     }
 
     document.querySelectorAll("[data-rec-badge]").forEach((badge) => {
       const key = badge.getAttribute("data-rec-badge");
-      badge.hidden = key !== fx.recommendedMode;
+      badge.hidden = key !== recKey;
     });
 
     if (suggestionSourceLabel) {
@@ -1138,6 +1433,8 @@
       const safetyNote = Array.isArray(rx.safetyLocks) && rx.safetyLocks.length
         ? rx.safetyLocks[0]
         : "";
+      const summaryText = rx.summary || fx.rationale || fx.secondaryNote || "";
+      const displayTorque = MODE_CATALOG[recKey]?.defaultTarget ?? Number(fx.hardwareTorqueNm ?? fx.targetTorqueNm ?? 22);
       clinicalFlexionCard.innerHTML = `
         <div class="clinical-flexion-top">
           <div>
@@ -1146,75 +1443,97 @@
           </div>
           <a class="mini-pill-btn" href="/intake">Edit Clinical Intake</a>
         </div>
-        <p class="clinical-flexion-summary">${escapeHtml(fx.rationale)}</p>
+        <p class="clinical-flexion-summary">${escapeHtml(summaryText)}</p>
         <div class="clinical-flexion-grid">
           <span class="clinical-flexion-chip">Mode: ${escapeHtml(fx.modeName)}</span>
-          <span class="clinical-flexion-chip">Target Torque: ${Number(fx.targetTorqueNm)} N·m (${escapeHtml(fx.roleLabel)})</span>
+          <span class="clinical-flexion-chip">Target Torque: ${displayTorque} N·m (${escapeHtml(fx.roleLabel)})</span>
           <span class="clinical-flexion-chip">Repetitions: ${Number(fx.suggestedReps)} reps</span>
-          <span class="clinical-flexion-chip">ROM: ${Number(fx.romWindowDeg[0])}°–${Number(fx.romWindowDeg[1])}° · ${escapeHtml(fx.speedSpec)}</span>
+          <span class="clinical-flexion-chip">Working ROM: ${workingRom[0]}°–${workingRom[1]}° · ${escapeHtml(fx.speedSpec)}</span>
           ${safetyNote ? `<span class="clinical-flexion-chip warn">${escapeHtml(safetyNote)}</span>` : ""}
         </div>
       `;
     }
 
-    if (MODE_CATALOG[fx.recommendedMode]) {
-      state.targetReps = MODE_CATALOG[fx.recommendedMode].suggestedReps;
-      state.targetTorque = MODE_CATALOG[fx.recommendedMode].defaultTarget;
-      selectMode(fx.recommendedMode, true);
+    if (MODE_CATALOG[recKey]) {
+      state.targetReps = MODE_CATALOG[recKey].suggestedReps;
+      state.targetTorque = MODE_CATALOG[recKey].defaultTarget;
+      selectMode(recKey, true);
     }
   }
 
   async function loadDeviceConfig() {
+    const params = new URLSearchParams(window.location.search);
+    const hasEspParam = Boolean(params.get("esp"));
+    if (hasEspParam) state.shouldConnectWs = true;
+
     try {
       const [cfgRes, meRes] = await Promise.all([
         fetch("/api/device/config"),
         fetch("/api/me")
       ]);
+      let rx = null;
       if (cfgRes.ok) {
         const cfg = await cfgRes.json();
-        if (cfg.wsProxyPath && window.location.host) {
+        const wsPath = cfg.bridgeWsPath || cfg.wsProxyPath;
+        if (wsPath && window.location.host) {
           const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-          state.wsUrl = `${proto}//${window.location.host}${cfg.wsProxyPath}`;
+          state.wsUrl = `${proto}//${window.location.host}${wsPath}`;
         }
-        if (cfg.connected) {
-          updateConnectionUI(true);
+        const isConnected = cfg.deviceMode === "connected" || Boolean(cfg.connected);
+        state.deviceMode = isConnected ? "connected" : (cfg.deviceMode || "demo");
+        state.shouldConnectWs = isConnected || hasEspParam;
+        if (isConnected) {
+          updateConnectionUI(true, "● CONNECTED — WAITING STREAM");
+        }
+        if (cfg.prescription) {
+          rx = cfg.prescription;
         }
       }
       if (meRes.ok) {
         const me = await meRes.json();
-        if (me?.user?.prescription) {
-          applyClinicalPrescription(me.user.prescription);
+        if (!rx && me?.user?.prescription) {
+          rx = me.user.prescription;
         }
+      }
+      if (rx) {
+        applyClinicalPrescription(rx);
       }
     } catch (_err) {
       // Static file fallback
     }
-    connectEspSocket();
+    if (state.shouldConnectWs) {
+      connectEspSocket();
+    }
   }
 
   async function loadExerciseHistory() {
     if (!historyList) return;
     try {
-      const res = await fetch("/api/dashboard");
+      const res = await fetch("/api/progress");
       if (!res.ok) throw new Error("Unauthenticated or offline");
       const data = await res.json();
-      const history = Array.isArray(data.exerciseHistory) ? data.exerciseHistory : [];
+      const history = Array.isArray(data.sessions) ? data.sessions : [];
       if (!history.length) {
         historyList.innerHTML = `<div class="exercise-history-empty">No exercises recorded yet. Complete a session above to log your progress.</div>`;
         return;
       }
-      historyList.innerHTML = history.slice(0, 6).map((item) => `
+      historyList.innerHTML = history.slice(0, 6).map((item) => {
+        const when = item.date ? new Date(item.date).toLocaleString() : "Recorded session";
+        const durLabel = item.durationSeconds ? `${Math.round(item.durationSeconds)}s` : `${item.reps} reps`;
+        const highlight = item.torqueNm != null ? `${item.torqueNm} N·m` : `${item.reps} reps`;
+        return `
         <div class="exercise-history-row">
           <div>
-            <strong>${escapeHtml(item.type)}</strong>
-            <div class="exercise-history-meta">${escapeHtml(item.date)}</div>
+            <strong>${escapeHtml(item.mode || item.type || "Exercise")}</strong>
+            <div class="exercise-history-meta">${escapeHtml(when)} · ${escapeHtml(String(item.reps || 0))} reps</div>
           </div>
           <div class="exercise-history-stats">
-            <span class="exercise-stat-pill">${escapeHtml(item.duration)}</span>
-            <span class="exercise-stat-pill">${escapeHtml(item.Highlight)}</span>
+            <span class="exercise-stat-pill">${escapeHtml(durLabel)}</span>
+            <span class="exercise-stat-pill">${escapeHtml(highlight)}</span>
           </div>
         </div>
-      `).join("");
+      `;
+      }).join("");
     } catch (_err) {
       historyList.innerHTML = `
         <div class="exercise-history-row">
@@ -1224,7 +1543,7 @@
           </div>
           <div class="exercise-history-stats">
             <span class="exercise-stat-pill">12/12 reps</span>
-            <span class="exercise-stat-pill">25 N·m target</span>
+            <span class="exercise-stat-pill">22 N·m target</span>
           </div>
         </div>
       `;
@@ -1239,54 +1558,165 @@
     });
   }
 
-  if (quickHomeBtn) {
-    quickHomeBtn.addEventListener("click", () => {
-      connectEspSocket();
-      const sent = sendEspCommand({ type: "setup_home" });
+  function triggerQuickHome() {
+    if (state.shouldConnectWs) connectEspSocket();
+    state.unhomedPrompt = false;
+    const sent = sendEspCommand({ type: "setup_home" });
+    if (topHubStatusNote) {
+      topHubStatusNote.innerHTML = sent
+        ? "Sent <strong>Set 0° Home</strong> (<code>OP_SETUP_QUICK_6S</code>) to Master ESP32 → latching 0.0° &amp; ACS712 zero on Top-Hub U2…"
+        : "Demo mode: simulated Top-Hub 0.0° Home latch (H:1).";
+    }
+    if (!sent) {
+      state.u2Homed = true;
+      state.kneeAngleDeg = 0;
+      updateTopHubHardwareBar();
+    } else {
+      renderSafetyBanner();
+    }
+  }
+
+  function triggerAutoHome() {
+    if (state.shouldConnectWs) connectEspSocket();
+    state.unhomedPrompt = false;
+    state.setupState = "autohoming";
+    state.setupWarning = true;
+    state.setupTargetDeg = 0;
+    const sent = sendEspCommand({ type: "setup_full" });
+    if (topHubStatusNote) {
+      topHubStatusNote.innerHTML = sent
+        ? "Setup in progress — sent <strong>Auto-Home (STOP1)</strong> to Top-Hub U2. Please stay away!"
+        : "Demo mode: simulated Top-Hub motorized Auto-Home (H:1).";
+    }
+    if (!sent) {
+      state.setupState = "idle";
+      state.setupWarning = false;
+      state.u2Homed = true;
+      state.kneeAngleDeg = 0;
+    }
+    updateTopHubHardwareBar();
+  }
+
+  function triggerParkHome() {
+    if (state.shouldConnectWs) connectEspSocket();
+    if (state.espConnected && state.u2Linked && !state.u2Homed) {
+      state.unhomedPrompt = true;
       if (topHubStatusNote) {
-        topHubStatusNote.innerHTML = sent
-          ? "Sent <strong>Set 0° Home</strong> (<code>OP_SETUP_QUICK_6S</code>) to Master ESP32 → latching 0.0° &amp; ACS712 zero on Top-Hub U2…"
-          : "Demo mode: simulated Top-Hub 0.0° Home latch (H:1).";
+        topHubStatusNote.textContent = "Top-Hub is unhomed (H:0) — use Auto-Home (STOP1) to seek 0° safely.";
       }
-      if (!sent) {
-        state.u2Homed = true;
-        state.kneeAngleDeg = 0;
-        updateTopHubHardwareBar();
-      }
-    });
+      renderSafetyBanner();
+      return;
+    }
+    state.active = false;
+    state.paused = true;
+    state.setupState = "parking_home";
+    state.setupWarning = true;
+    state.setupTargetDeg = 0;
+    clearInterval(simTimer);
+    const sent = sendEspCommand({ type: "park_home" });
+    if (topHubStatusNote) {
+      topHubStatusNote.innerHTML = sent
+        ? "Returning arm slowly (10°/s) to <strong>0° Park</strong> — please stay away!"
+        : "Demo mode: arm returned smoothly to 0° Park.";
+    }
+    if (!sent) {
+      state.setupState = "idle";
+      state.setupWarning = false;
+      state.kneeAngleDeg = 0;
+      state.kneeVelDegS = 0;
+    }
+    updateTopHubHardwareBar();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function triggerReleaseLock() {
+    if (state.shouldConnectWs) connectEspSocket();
+    state.estopped = false;
+    state.u2HardStop = false;
+    state.u2Spasm = false;
+    state.u2FaultLockout = false;
+    state.lastSafetyMessage = "";
+    const sent = sendEspCommand({ type: "hardstop_release" });
+    updateTargetTorqueUI();
+    updateTopHubHardwareBar();
+    if (topHubStatusNote) {
+      topHubStatusNote.textContent = sent
+        ? "Sent Hard-Stop Release (ESTOP_HARD_STOP_RELEASE) to Master ESP32 → Top-Hub U2 unlocked."
+        : "Cleared Hard-Stop & spasm lock state locally.";
+    }
+    if (espCommandStatus) {
+      espCommandStatus.textContent = sent
+        ? "Safety lock released — click Resume Session or Return to 0° Park."
+        : "Safety lock cleared locally.";
+    }
+  }
+
+  function engageHardStop() {
+    state.estopped = true;
+    state.paused = true;
+    state.setupState = "idle";
+    state.setupWarning = false;
+    setOdometerValue(0);
+    updateTargetTorqueUI();
+    updateTopHubHardwareBar();
+    sendEspCommand({ type: "estop", estop_active: 1 });
+    if (espCommandStatus) {
+      espCommandStatus.textContent = "HARD STOP engaged — motor torque set to 0 N·m. Click Release Lock or Resume Session to unlock.";
+    }
+  }
+
+  if (quickHomeBtn) {
+    quickHomeBtn.addEventListener("click", triggerQuickHome);
   }
 
   if (autoHomeBtn) {
-    autoHomeBtn.addEventListener("click", () => {
-      connectEspSocket();
-      const sent = sendEspCommand({ type: "setup_full" });
-      if (topHubStatusNote) {
-        topHubStatusNote.innerHTML = sent
-          ? "Sent <strong>Auto-Home (STOP1)</strong> (<code>OP_SETUP_FULL_25S</code>) to Master ESP32 → seeking extension stop on Top-Hub U2…"
-          : "Demo mode: simulated Top-Hub motorized Auto-Home (H:1).";
-      }
-      if (!sent) {
-        state.u2Homed = true;
-        state.kneeAngleDeg = 0;
-        updateTopHubHardwareBar();
-      }
-    });
+    autoHomeBtn.addEventListener("click", triggerAutoHome);
+  }
+
+  if (parkHomeBtn) {
+    parkHomeBtn.addEventListener("click", triggerParkHome);
+  }
+
+  if (completeParkBtn) {
+    completeParkBtn.addEventListener("click", triggerParkHome);
   }
 
   if (releaseLockBtn) {
-    releaseLockBtn.addEventListener("click", () => {
-      connectEspSocket();
-      state.estopped = false;
-      state.u2HardStop = false;
-      state.u2Spasm = false;
-      const sent = sendEspCommand({ type: "hardstop_release" });
-      updateTargetTorqueUI();
-      updateTopHubHardwareBar();
-      if (topHubStatusNote) {
-        topHubStatusNote.textContent = sent
-          ? "Sent Hard-Stop Release (ESTOP_HARD_STOP_RELEASE) to Master ESP32 → Top-Hub U2 unlocked."
-          : "Cleared Hard-Stop lock state locally.";
+    releaseLockBtn.addEventListener("click", triggerReleaseLock);
+  }
+
+  if (bannerQuickHomeBtn) {
+    bannerQuickHomeBtn.addEventListener("click", triggerQuickHome);
+  }
+
+  if (bannerAutoHomeBtn) {
+    bannerAutoHomeBtn.addEventListener("click", triggerAutoHome);
+  }
+
+  if (bannerReleaseBtn) {
+    bannerReleaseBtn.addEventListener("click", triggerReleaseLock);
+  }
+
+  if (bannerHardStopBtn) {
+    bannerHardStopBtn.addEventListener("click", engageHardStop);
+  }
+
+  if (beginExerciseBtn) {
+    beginExerciseBtn.addEventListener("click", () => {
+      state.setupState = "idle";
+      state.setupWarning = false;
+      state.paused = false;
+      sendEspCommand({ type: "begin_exercise" });
+      if (espCommandStatus) {
+        espCommandStatus.textContent = `Exercise active in ${currentMode().title} (${state.romWindowDeg[0]}°–${state.romWindowDeg[1]}°).`;
       }
+      updateTopHubHardwareBar();
+    });
+  }
+
+  if (cancelSetupBtn) {
+    cancelSetupBtn.addEventListener("click", () => {
+      exitToSetup();
     });
   }
 
@@ -1306,11 +1736,10 @@
 
   romPresetBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
-      const rMin = Number(btn.getAttribute("data-rom-min")) || 0;
-      const rMax = Number(btn.getAttribute("data-rom-max")) || 110;
+      const [rMin, rMax] = normalizeWorkingRom(btn.getAttribute("data-rom-min"), btn.getAttribute("data-rom-max"));
       if (romMinInput) romMinInput.value = String(rMin);
       if (romMaxInput) romMaxInput.value = String(rMax);
-      applyKinematicsFromInputs(true);
+      applyKinematicsFromInputs(true, false);
     });
   });
 
@@ -1400,24 +1829,27 @@
   if (pauseSessionBtn) {
     pauseSessionBtn.addEventListener("click", () => {
       if (!state.active || state.ended) return;
-      if (state.estopped) {
+      if (state.setupState === "moving_to_start" || state.setupState === "ready_at_start") return;
+      if (state.estopped || state.u2HardStop || state.u2Spasm || state.u2FaultLockout) {
         state.estopped = false;
         state.u2HardStop = false;
+        state.u2Spasm = false;
+        state.u2FaultLockout = false;
+        state.lastSafetyMessage = "";
         state.paused = false;
-        pauseSessionBtn.textContent = "Pause Session";
         sendEspCommand({ type: "resume_session" });
         updateTargetTorqueUI();
         updateTopHubHardwareBar();
         if (espCommandStatus) {
-          espCommandStatus.textContent = "Hard Stop released & session resumed.";
+          espCommandStatus.textContent = "Safety lock cleared & session resumed.";
         }
         return;
       }
       state.paused = !state.paused;
-      pauseSessionBtn.textContent = state.paused ? "Resume Session" : "Pause Session";
       sendEspCommand({
         type: state.paused ? "pause_session" : "resume_session"
       });
+      updateTopHubHardwareBar();
       if (espCommandStatus) {
         espCommandStatus.textContent = state.paused ? "Session paused." : "Session resumed.";
       }
@@ -1431,28 +1863,10 @@
   if (hardStopBtn) {
     hardStopBtn.addEventListener("click", () => {
       if (state.estopped || state.u2HardStop) {
-        state.estopped = false;
-        state.u2HardStop = false;
-        sendEspCommand({ type: "hardstop_release" });
-        updateTargetTorqueUI();
-        updateTopHubHardwareBar();
-        if (espCommandStatus) {
-          espCommandStatus.textContent = "Hard Stop released — click Resume Session to continue.";
-        }
+        triggerReleaseLock();
         return;
       }
-      state.estopped = true;
-      state.paused = true;
-      setOdometerValue(0);
-      updateTargetTorqueUI();
-      updateTopHubHardwareBar();
-      if (pauseSessionBtn) {
-        pauseSessionBtn.textContent = "Resume Session";
-      }
-      sendEspCommand({ type: "estop", estop_active: 1 });
-      if (espCommandStatus) {
-        espCommandStatus.textContent = "HARD STOP engaged — motor torque set to 0 N·m. Click Release Hard Stop or Resume Session to unlock.";
-      }
+      engageHardStop();
     });
   }
 

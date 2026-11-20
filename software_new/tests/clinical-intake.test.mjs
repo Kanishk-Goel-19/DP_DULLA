@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { computeClinicalPrescription, normalizeIntake } from '../backend/clinical.mjs'
+import { computeClinicalPrescription, mapAnatomicalToMachineRom, normalizeIntake } from '../backend/clinical.mjs'
 import { AuthStore } from '../backend/core.mjs'
 import { createAppServer } from '../server.mjs'
 
@@ -122,6 +122,23 @@ test('Section 3.2 Clinical Decision Tree routes all acute, early ROM, and interm
   assert.equal(intermL2.flexion.modeId, 'isokinetic')
   assert.equal(intermL2.flexion.targetTorqueNm, 68)
   assert.equal(intermL2.geometry.gamma60, 1.26)
+  // Verify Top-Hub machine ROM mapping [120, 180] and hardware torque caps across all gates
+  for (const rx of [gate1Vas, gate1Early, gate3Yes, gate3No, earlyAclCycling, earlyGeneralBoth, intermL1, intermL2]) {
+    assert.equal(rx.flexion.recommendedMode, rx.flexion.modeId)
+    assert.equal(Array.isArray(rx.flexion.machineRomWindowDeg), true)
+    const [mMin, mMax] = rx.flexion.machineRomWindowDeg
+    assert.ok(mMin >= 120 && mMin <= 170, `expected machine min ROM in [120, 170], got ${mMin}`)
+    assert.ok(mMax >= mMin + 10 && mMax <= 180, `expected machine max ROM in [${mMin + 10}, 180], got ${mMax}`)
+    if (rx.flexion.modeId === 'passive') {
+      assert.ok(rx.flexion.hardwareTorqueNm <= 25)
+    } else {
+      assert.ok(rx.flexion.hardwareTorqueNm <= 45)
+    }
+    assert.equal(Number.isInteger(rx.flexion.pathologyCode), true)
+  }
+  assert.equal(intermL2.flexion.pathologyCode, 1) // ACLR -> PATH_ACL_PROTECTED
+  assert.deepEqual(mapAnatomicalToMachineRom(0, 60), [120, 180])
+  assert.deepEqual(mapAnatomicalToMachineRom(15, 20), [135, 145])
 })
 
 test('normalizeIntake validates clinical bounds', () => {

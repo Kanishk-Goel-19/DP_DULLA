@@ -39,7 +39,9 @@ enum OperatingMode : uint8_t {
     OP_CYCLE_POWER     = 8,  // Bottom Tier: Constant Power Ergometer
     OP_DIRECT_PWM_TEST = 9,  // Direct open-loop PWM bench test ("pwm 40" / "pwm -40")
     OP_AUTO_BENCH_TEST = 10, // Automatic bidirectional bench test ("test")
-    OP_ACTIVE_ASSIST   = 11  // Patient-triggered / Auto Active-Assist (yield-forward)
+    OP_ACTIVE_ASSIST   = 11, // Patient-triggered / Auto Active-Assist (yield-forward)
+    OP_GOTO_START      = 12, // Slow setup move to rom_min_deg (120 deg) & compliant hold
+    OP_PARK_HOME       = 13  // Slow return to 0 deg parked home stop, then auto-IDLE
 };
 
 enum PathologyProfile : uint8_t {
@@ -70,6 +72,7 @@ enum CyclingStepAction : uint8_t {
 #define STATE_FLAG_HARDSTOP_LOCKED  (1 << 4)
 #define STATE_FLAG_FAULT_LOCKOUT    (1 << 5)
 #define STATE_FLAG_BUSY_HOMING      (1 << 6)
+#define STATE_FLAG_POSITIONING      (1 << 7) // Actively moving during setup/park GOTO
 
 // State Flag Bits for CyclingTelemetryPacket_t::pedal_state_flags
 #define CYCLE_FLAG_STEPPER_HOMED    (1 << 0)

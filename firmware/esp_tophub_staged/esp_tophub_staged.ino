@@ -108,8 +108,14 @@ static const float    VBUS_ABS_OV_FAULT_V   = 28.8f;   // Unconditional HW OV fa
 static const float    ROM_ABS_MIN_DEG        = 0.0f;
 static const float    ROM_ABS_MAX_DEG        = 180.0f;
 static const float    ROM_MIN_SPAN_DEG       = 10.0f;
-static const float    DEFAULT_ROM_MIN_DEG    = 5.0f;    // Safe extension limit off STOP1
-static const float    DEFAULT_ROM_MAX_DEG    = 90.0f;   // Default flexion limit
+static const float    WORK_ROM_MIN_DEG       = 120.0f;  // Straight-leg extension working start
+static const float    WORK_ROM_MAX_DEG       = 180.0f;  // Full-flexion working limit
+static const float    DEFAULT_ROM_MIN_DEG    = WORK_ROM_MIN_DEG;
+static const float    DEFAULT_ROM_MAX_DEG    = WORK_ROM_MAX_DEG;
+static const float    SETUP_POS_SPEED_DEGS   = 10.0f;   // Slow safe setup/park speed (~12s for 0->120)
+static const float    SETUP_POS_MAX_I_A      = 5.0f;    // Gentle current limit while moving unloaded
+static const float    PARK_HOME_TARGET_DEG   = 1.0f;    // Stops 1 deg off STOP1 without banging hard-stop
+static const float    AUTOHOME_BACKOFF_DEG   = 3.0f;    // Gentle backoff off STOP1 after autohome
 static const float    DEFAULT_ASSIST_MAX_I_A = 6.0f;    // Outer-loop current cap (A)
 static const float    DEFAULT_KP_POS_NM_DEG  = 0.55f;   // Knee position gain (Nm/deg)
 static const float    DEFAULT_KD_VEL_NMS_DEG = 0.06f;   // Knee velocity gain (Nm/(deg/s))
@@ -122,7 +128,7 @@ static const float    BACKLASH_DEG_DEFAULT   = 0.65f;   // GBX1 anti-backlash en
 static const float    DEFAULT_ISO_EXT_NM     = 18.0f;   // Default isotonic quad resistance (Nm)
 static const float    DEFAULT_ISO_FLEX_NM    = 12.0f;   // Default isotonic ham resistance (Nm)
 static const float    DEFAULT_ISOK_VEL_DEGS  = 45.0f;   // Default isokinetic velocity limit (deg/s)
-static const float    DEFAULT_ISOM_ANGLE_DEG = 60.0f;   // Default isometric lock angle (deg)
+static const float    DEFAULT_ISOM_ANGLE_DEG = 150.0f;  // Default isometric lock angle (mid 120..180 deg)
 static const float    DEFAULT_ISOM_MAX_NM    = 25.0f;   // Default isometric knee torque ceiling (Nm)
 static const float    HARDSTOP_LOCK_MAX_NM   = 22.5f;   // Compliant electronic hard-stop yield (Nm knee)
 static const uint32_t ESPNOW_TELEM_PERIOD_MS = 20U;     // 50 Hz ESP-NOW telemetry stream to U1
@@ -291,6 +297,8 @@ static uint8_t       g_homing_msg_code    = 0;       // 1..6 non-blocking result
 static float         g_traj_target_tk     = 0.0f;
 static float         g_goto_goal_tk       = 0.0f;
 static float         g_goto_speed_degs    = 20.0f;
+static float         g_goto_max_i_a       = DEFAULT_ASSIST_MAX_I_A;
+static bool          g_goto_auto_release  = false; // True for OP_PARK_HOME (releases to IDLE on arrival)
 static uint32_t      g_goto_settle_ms     = 0;
 static bool          g_goto_reached_sent  = false;
 static uint16_t      g_obst_ticks         = 0;
@@ -301,6 +309,7 @@ static float         g_cpm_speed_degs     = DEFAULT_CPM_SPEED_DEGS;
 static int           g_cpm_target_cycles  = 0;       // 0 = continuous until 's'
 static int           g_cpm_done_cycles    = 0;
 static uint8_t       g_cpm_phase          = 0;       // 0=flex,1=dwell_top,2=ext,3=dwell_bot
+static bool          g_cpm_approaching    = false;   // Slow approach when entered below rom_min_deg
 static uint32_t      g_cpm_dwell_ms       = 0;
 
 static bool          g_assist_auto_cycle  = false;
@@ -364,6 +373,7 @@ static int8_t        g_prev_vel_sign        = 0;
 static uint32_t      g_clonus_window_start  = 0;
 static uint8_t       g_clonus_reversals     = 0;
 static uint8_t       g_safety_msg_code      = 0; // 1=ov,2=spasm_df,3=cpm_catch,4=res,5=clonus,6=wdog,7=lock,8=rel
+static bool          g_safety_msg_is_backoff = false;
 static float         g_safety_msg_val       = 0.0f;
 static float         g_safety_trip_f_n      = 0.0f;
 static float         g_safety_trip_i_a      = 0.0f;
@@ -596,6 +606,8 @@ static void stopAllImmediate() {
     g_last_torque_sign       = 0;
     g_last_rev_theta_m       = g_theta_m_deg;
     g_home_phase             = 0;
+    g_cpm_approaching        = false;
+    g_goto_auto_release      = false;
     g_in_spasm_backoff       = false;
     g_hardstop_locked        = false;
     g_ctrl_from_espnow       = false;
@@ -630,7 +642,7 @@ static inline float mapArmToKneeAngleDeg(float theta_m_deg, float d_offset_m, fl
 
 static inline float computeGammaFactor(float theta_k_deg, float d_offset_m, float L_leg_m) {
     float ratio = (L_leg_m > 0.05f) ? (d_offset_m / L_leg_m) : 0.8333f;
-    float s     = sinf(constrain(theta_k_deg, 0.0f, 130.0f) * RAD_PER_DEG);
+    float s     = sinf(constrain(theta_k_deg, 0.0f, ROM_ABS_MAX_DEG) * RAD_PER_DEG);
     return constrain(1.0f + ratio * s, 1.0f, 2.50f);
 }
 
@@ -826,7 +838,7 @@ static void loadCalibrationFromNVS() {
     g_wifi_enabled = w_en;
     g_wifi_channel = (wch >= 1 && wch <= 13) ? wch : REHAB_WIFI_CHANNEL;
     if (isfinite(rmin) && isfinite(rmax) &&
-        rmin >= ROM_ABS_MIN_DEG && rmax <= ROM_ABS_MAX_DEG &&
+        rmin >= WORK_ROM_MIN_DEG && rmax <= WORK_ROM_MAX_DEG &&
         (rmax - rmin) >= ROM_MIN_SPAN_DEG) {
         g_rom_min_deg = rmin;
         g_rom_max_deg = rmax;
@@ -1264,7 +1276,7 @@ static void updateRepTracker(float tk_deg, float omega_k_degs, float tau_knee_nm
     if (span < ROM_MIN_SPAN_DEG) return;
 
     if (g_rep_phase == 0) {
-        if (tk_deg >= (g_rom_min_deg + 0.25f * span)) {
+        if (tk_deg <= (g_rom_min_deg + 0.30f * span)) {
             g_rep_phase        = 1;
             g_rep_min_tk       = tk_deg;
             g_rep_max_tk       = tk_deg;
@@ -1300,11 +1312,11 @@ static void updateRepTracker(float tk_deg, float omega_k_degs, float tau_knee_nm
     }
 
     if (g_rep_phase == 1) {
-        if (tk_deg >= (g_rom_max_deg - 4.0f)) {
+        if (tk_deg >= (g_rom_max_deg - 5.0f)) {
             g_rep_phase = 2;
         }
     } else if (g_rep_phase == 2) {
-        if (tk_deg <= (g_rom_min_deg + 4.0f)) {
+        if (tk_deg <= (g_rom_min_deg + 5.0f)) {
             g_rep_count++;
             float cov_pct = 0.0f;
             if (g_rep_samples >= 10U) {
@@ -1339,7 +1351,17 @@ static void updateRepTracker(float tk_deg, float omega_k_degs, float tau_knee_nm
 
             g_rep_done_msg        = true;
             g_rep_summary_tx_pend = true;
-            g_rep_phase           = 0;
+            g_rep_phase           = 1;
+            g_rep_min_tk          = tk_deg;
+            g_rep_max_tk          = tk_deg;
+            g_rep_peak_flex_nm    = 0.0f;
+            g_rep_peak_ext_nm     = 0.0f;
+            g_rep_work_j          = 0.0f;
+            g_rep_ang_pk_ext      = tk_deg;
+            g_rep_ang_pk_flex     = tk_deg;
+            g_rep_vel_sum         = 0.0;
+            g_rep_vel_sq_sum      = 0.0;
+            g_rep_samples         = 0;
         }
     }
 }
@@ -1360,7 +1382,7 @@ static float computePositionAssistCurrent(float target_tk, float target_wk,
     } else if (dir_mask < 0) {
         i_cmd = fminf(0.0f, i_cmd); // Extension-only assist
     }
-    if (g_theta_k_deg >= (ROM_ABS_MAX_DEG - 1.0f) && i_cmd > 0.0f) {
+    if (g_theta_k_deg >= (ROM_ABS_MAX_DEG + 1.5f) && i_cmd > 0.0f) {
         i_cmd = 0.0f;
     }
     if (g_theta_k_deg <= (ROM_ABS_MIN_DEG + 0.25f) && i_cmd < 0.0f) {
@@ -1388,20 +1410,22 @@ static float computePhysiologicalTorqueTarget(float theta_k_deg, float peak_torq
                                               bool is_extension, uint8_t profile) {
     if (peak_torque_nm <= 0.01f) return 0.0f;
 
-    float u     = constrain(theta_k_deg / 110.0f, 0.0f, 1.0f);
+    float span  = fmaxf(g_rom_max_deg - g_rom_min_deg, ROM_MIN_SPAN_DEG);
+    float u     = constrain((theta_k_deg - g_rom_min_deg) / span, 0.0f, 1.0f);
     float shape = is_extension ? (0.35f + 0.65f * sinf(CLINICAL_PI * u))
                                : (0.40f + 0.60f * sinf(CLINICAL_PI * u));
 
-    if (profile == PATH_ACL_PROTECTED && is_extension && theta_k_deg < 40.0f) {
-        // Protect ACL graft against anterior tibial shear in terminal 40 -> 0 deg extension
-        float acl_taper = constrain(0.15f + 0.85f * (theta_k_deg / 40.0f), 0.15f, 1.0f);
+    float flex_from_ext = fmaxf(0.0f, theta_k_deg - g_rom_min_deg);
+    if (profile == PATH_ACL_PROTECTED && is_extension && flex_from_ext < 25.0f) {
+        // Protect ACL graft against anterior tibial shear near terminal extension (rom_min + 25 deg -> rom_min)
+        float acl_taper = constrain(0.20f + 0.80f * (flex_from_ext / 25.0f), 0.20f, 1.0f);
         shape *= acl_taper;
     } else if (profile == PATH_TKA) {
-        float low_margin  = constrain((theta_k_deg - 10.0f) / 30.0f, 0.0f, 1.0f);
-        float high_margin = constrain((100.0f - theta_k_deg) / 30.0f, 0.0f, 1.0f);
+        float low_margin  = constrain(u / 0.25f, 0.0f, 1.0f);
+        float high_margin = constrain((1.0f - u) / 0.25f, 0.0f, 1.0f);
         shape *= (0.60f + 0.40f * fminf(low_margin, high_margin));
-    } else if (profile == PATH_PFPS && theta_k_deg > 55.0f) {
-        float pfps_taper = 1.0f - 0.65f * constrain((theta_k_deg - 55.0f) / 45.0f, 0.0f, 1.0f);
+    } else if (profile == PATH_PFPS && u > 0.55f) {
+        float pfps_taper = 1.0f - 0.60f * constrain((u - 0.55f) / 0.45f, 0.0f, 1.0f);
         shape *= pfps_taper;
     }
 
@@ -1427,6 +1451,7 @@ static void engageHardStopLock(bool from_espnow) {
     g_hardstop_locked        = true;
     g_spasm_latched          = false;
     g_in_spasm_backoff       = false;
+    g_cpm_approaching        = false;
     g_ctrl_from_espnow       = from_espnow;
     g_freeze_theta_m_deg     = g_theta_m_deg;
     g_mode                   = MODE_HARDSTOP_LOCK;
@@ -1444,6 +1469,7 @@ static void engageHardStopLock(bool from_espnow) {
     g_last_torque_sign       = 0;
     g_active_target_curve_nm = 0.0f;
     g_safety_msg_code        = 7;
+    g_safety_msg_is_backoff  = false;
     g_safety_msg_val         = g_theta_k_deg;
 }
 
@@ -1453,67 +1479,108 @@ static void releaseHardStopLock() {
     g_spasm_latched        = false;
     g_espnow_fault_lockout = false;
     if (was_locked) {
-        g_safety_msg_code = 8;
-        g_safety_msg_val  = g_theta_k_deg;
+        g_safety_msg_code       = 8;
+        g_safety_msg_is_backoff = false;
+        g_safety_msg_val        = g_theta_k_deg;
     }
 }
 
-static void evaluateSafetySupervisor(uint32_t now_ms) {
-    static uint16_t   s_cpm_catch_ticks  = 0;
-    static uint16_t   s_spasm_dfdt_ticks = 0;
-    static StagedMode s_prev_sup_mode    = MODE_IDLE;
-    StagedMode        entry_mode         = g_mode;
+static void triggerCpmSpasmBackoff(uint32_t now_ms, uint8_t msg_code, float msg_val) {
+    g_in_spasm_backoff      = true;
+    g_spasm_latched         = true;
+    g_espnow_fault_lockout  = true;
+    g_obst_ticks            = 0;
+    g_cpm_dwell_ms          = now_ms;
+    g_backoff_target_tk     = constrain(g_theta_k_deg + ((g_cpm_phase == 0) ? -4.0f : +4.0f),
+                                        g_rom_min_deg, g_rom_max_deg);
+    g_traj_target_tk        = g_theta_k_deg;
+    g_safety_msg_code       = msg_code;
+    g_safety_msg_is_backoff = true;
+    g_safety_msg_val        = msg_val;
+}
 
-    auto finalizeSupervisor = [&]() {
-        g_prev_pad_force_n = g_pad_force_n;
-        s_prev_sup_mode    = g_mode;
+static void evaluateSafetySupervisor(uint32_t now_ms) {
+    static uint16_t s_cpm_catch_ticks    = 0;
+    static uint16_t s_spasm_dfdt_ticks   = 0;
+    static float    s_pad_f_hist[10]     = {};
+    static uint8_t  s_pad_f_idx          = 0;
+    static float    s_clonus_last_rev_tk = 0.0f;
+    static bool     s_prev_sup_active    = false;
+
+    auto finalizeSupervisor = [&](bool cur_active) {
+        g_prev_pad_force_n       = g_pad_force_n;
+        s_pad_f_hist[s_pad_f_idx] = g_pad_force_n;
+        s_pad_f_idx              = (uint8_t)((s_pad_f_idx + 1U) % 10U);
+        s_prev_sup_active        = cur_active;
     };
 
     // 1. Deterministic 500 ms ESP-NOW Heartbeat Watchdog when U1 Master is controlling
     if (g_ctrl_from_espnow && (uint32_t)(now_ms - g_master_last_rx_ms) > ESPNOW_WATCHDOG_MS) {
         stopAllImmediate();
-        s_cpm_catch_ticks  = 0;
-        s_spasm_dfdt_ticks = 0;
-        g_safety_msg_code  = 6;
-        g_safety_msg_val   = (float)ESPNOW_WATCHDOG_MS;
-        finalizeSupervisor();
+        s_cpm_catch_ticks       = 0;
+        s_spasm_dfdt_ticks      = 0;
+        g_safety_msg_code       = 6;
+        g_safety_msg_is_backoff = false;
+        g_safety_msg_val        = (float)ESPNOW_WATCHDOG_MS;
+        finalizeSupervisor(false);
         return;
     }
 
-    // Seed derivative baseline when freshly entering clinical therapy so prior modes cannot false-trip
-    if (isClinicalTherapyMode(entry_mode) && !isClinicalTherapyMode(s_prev_sup_mode)) {
-        g_prev_pad_force_n = g_pad_force_n;
-        s_spasm_dfdt_ticks = 0;
+    bool active_sup = isClinicalTherapyMode(g_mode) &&
+                      (g_mode != MODE_GOTO) &&
+                      !(g_mode == MODE_CPM && g_cpm_approaching);
+
+    // Seed derivative & clonus baselines when freshly entering clinical therapy
+    if (active_sup && !s_prev_sup_active) {
+        for (uint8_t i = 0; i < 10U; ++i) {
+            s_pad_f_hist[i] = g_pad_force_n;
+        }
+        s_pad_f_idx            = 0;
+        g_prev_pad_force_n     = g_pad_force_n;
+        s_spasm_dfdt_ticks     = 0;
+        s_cpm_catch_ticks      = 0;
+        g_residual_spike_ticks = 0;
+        g_clonus_reversals     = 0;
+        g_prev_vel_sign        = 0;
+        s_clonus_last_rev_tk   = g_theta_k_deg;
     }
 
     // Reset CPM catch integrator whenever outside active CPM travel
-    if (g_mode != MODE_CPM || g_in_spasm_backoff || (g_cpm_phase != 0 && g_cpm_phase != 2)) {
+    if (g_mode != MODE_CPM || g_cpm_approaching || g_in_spasm_backoff ||
+        (g_cpm_phase != 0 && g_cpm_phase != 2)) {
         s_cpm_catch_ticks = 0;
     }
 
     // 2. Itemized Clinical Spasm / Catch / Residual / Clonus Supervisors
-    if (isClinicalTherapyMode(g_mode) && g_safety_spasm_en && !g_in_spasm_backoff) {
-        // 2a. Rising rapid force transient (spasm dF/dt sustained >= 3 ticks / 6 ms to reject EMI spikes)
-        if (g_acs_valid && fabsf(g_pad_force_n) > 80.0f &&
-            fabsf(g_pad_force_n) > fabsf(g_prev_pad_force_n)) {
-            float df_dt_ns = fabsf(g_pad_force_n - g_prev_pad_force_n) / CONTROL_DT_SEC;
-            if (df_dt_ns > 2500.0f) {
-                if (s_spasm_dfdt_ticks < 50U) s_spasm_dfdt_ticks++;
-                if (s_spasm_dfdt_ticks >= 3U) {
-                    s_spasm_dfdt_ticks     = 0;
-                    g_safety_trip_f_n      = g_pad_force_n;
-                    g_safety_trip_i_a      = g_motor_current_a;
-                    g_safety_trip_mv       = g_acs_raw_mv;
-                    stopAllImmediate();
-                    g_spasm_latched        = true;
-                    g_espnow_fault_lockout = true;
-                    g_safety_msg_code      = 2;
-                    g_safety_msg_val       = df_dt_ns;
-                    finalizeSupervisor();
-                    return;
-                }
-            } else {
+    if (active_sup && g_safety_spasm_en && !g_in_spasm_backoff) {
+        // 2a. Rising rapid force transient over 20 ms sliding window (sustained >= 5 ticks / 10 ms)
+        float old_pad_f_20ms = s_pad_f_hist[s_pad_f_idx];
+        float df_20ms        = fabsf(g_pad_force_n) - fabsf(old_pad_f_20ms);
+        float df_dt_ns       = df_20ms / 0.020f;
+        bool  is_assist_mode = (g_mode == MODE_CPM || g_mode == MODE_ACTIVE_ASSIST);
+        float f_exp          = (g_L_leg_m > 0.05f) ? (fabsf(g_active_target_curve_nm) / g_L_leg_m) : 0.0f;
+        float f_thr          = is_assist_mode ? 45.0f : fmaxf(75.0f, f_exp + 30.0f);
+        float dfdt_thr       = is_assist_mode ? 700.0f : 1400.0f;
+
+        if (g_acs_valid && fabsf(g_pad_force_n) > f_thr && df_dt_ns > dfdt_thr) {
+            if (s_spasm_dfdt_ticks < 50U) s_spasm_dfdt_ticks++;
+            if (s_spasm_dfdt_ticks >= 5U) {
                 s_spasm_dfdt_ticks = 0;
+                g_safety_trip_f_n  = g_pad_force_n;
+                g_safety_trip_i_a  = g_motor_current_a;
+                g_safety_trip_mv   = g_acs_raw_mv;
+                if (g_mode == MODE_CPM && (g_cpm_phase == 0 || g_cpm_phase == 2)) {
+                    triggerCpmSpasmBackoff(now_ms, 2, df_dt_ns);
+                } else {
+                    stopAllImmediate();
+                    g_spasm_latched         = true;
+                    g_espnow_fault_lockout  = true;
+                    g_safety_msg_code       = 2;
+                    g_safety_msg_is_backoff = false;
+                    g_safety_msg_val        = df_dt_ns;
+                }
+                finalizeSupervisor(false);
+                return;
             }
         } else {
             s_spasm_dfdt_ticks = 0;
@@ -1521,21 +1588,19 @@ static void evaluateSafetySupervisor(uint32_t now_ms) {
 
         // 2b. CPM Joint-Catch & 4 deg Relief Backoff
         if (g_mode == MODE_CPM && (g_cpm_phase == 0 || g_cpm_phase == 2)) {
-            if (fabsf(g_traj_target_tk - g_theta_k_deg) > 8.0f && fabsf(g_pad_force_n) > 35.0f) {
+            float pos_err       = fabsf(g_traj_target_tk - g_theta_k_deg);
+            bool  loaded_catch  = g_acs_valid
+                                  ? (pos_err > 8.0f &&
+                                     (fabsf(g_pad_force_n) > 25.0f ||
+                                      fabsf(g_motor_current_a) > fmaxf(3.0f, 0.70f * g_assist_max_i_a)))
+                                  : (pos_err > 12.0f);
+            uint16_t catch_req  = g_acs_valid ? 60U : 150U; // 120 ms with ACS, 300 ms encoder-only
+            if (loaded_catch) {
                 if (s_cpm_catch_ticks < 500U) s_cpm_catch_ticks++;
-                if (s_cpm_catch_ticks >= 60U) { // 120 ms sustained loaded catch
-                    s_cpm_catch_ticks      = 0;
-                    g_in_spasm_backoff     = true;
-                    g_spasm_latched        = true;
-                    g_espnow_fault_lockout = true;
-                    g_obst_ticks           = 0;
-                    g_cpm_dwell_ms         = now_ms;
-                    g_backoff_target_tk    = constrain(g_theta_k_deg + ((g_cpm_phase == 0) ? -4.0f : +4.0f),
-                                                       g_rom_min_deg, g_rom_max_deg);
-                    g_traj_target_tk       = g_theta_k_deg;
-                    g_safety_msg_code      = 3;
-                    g_safety_msg_val       = g_theta_k_deg;
-                    finalizeSupervisor();
+                if (s_cpm_catch_ticks >= catch_req) {
+                    s_cpm_catch_ticks = 0;
+                    triggerCpmSpasmBackoff(now_ms, 3, g_theta_k_deg);
+                    finalizeSupervisor(false);
                     return;
                 }
             } else {
@@ -1543,28 +1608,56 @@ static void evaluateSafetySupervisor(uint32_t now_ms) {
             }
         }
 
-        // 2c. Residual current / torque spike at near-zero velocity (excluding static isometric hold)
-        if (g_mode != MODE_ISOMETRIC && g_acs_valid &&
-            fabsf(g_omega_k_deg_s) < 2.0f && fabsf(g_motor_current_a) > 11.0f) {
-            if (g_residual_spike_ticks < 500U) g_residual_spike_ticks++;
-            if (g_residual_spike_ticks >= 150U) { // 300 ms sustained stall push
-                float i_trip = g_motor_current_a;
-                stopAllImmediate();
-                g_spasm_latched        = true;
-                g_espnow_fault_lockout = true;
-                g_safety_msg_code      = 4;
-                g_safety_msg_val       = i_trip;
-                finalizeSupervisor();
-                return;
+        // 2c. Sustained Stall / High Current at Near-Zero Velocity (excluding static isometric hold)
+        if (g_mode != MODE_ISOMETRIC && g_acs_valid) {
+            bool stall_cond = false;
+            if (is_assist_mode) {
+                stall_cond = (fabsf(g_omega_k_deg_s) < 2.0f) &&
+                             (fabsf(g_motor_current_a) > fmaxf(3.5f, 0.85f * g_assist_max_i_a)) &&
+                             (fabsf(g_traj_target_tk - g_theta_k_deg) > 5.0f);
+            } else {
+                stall_cond = (fabsf(g_omega_k_deg_s) < 2.0f) &&
+                             (fabsf(g_motor_current_a) > 9.5f);
+            }
+
+            if (stall_cond) {
+                if (g_residual_spike_ticks < 500U) g_residual_spike_ticks++;
+                if (g_residual_spike_ticks >= 150U) { // 300 ms sustained stall push
+                    float i_trip = g_motor_current_a;
+                    g_residual_spike_ticks = 0;
+                    if (g_mode == MODE_CPM && (g_cpm_phase == 0 || g_cpm_phase == 2)) {
+                        triggerCpmSpasmBackoff(now_ms, 4, i_trip);
+                    } else {
+                        stopAllImmediate();
+                        g_spasm_latched         = true;
+                        g_espnow_fault_lockout  = true;
+                        g_safety_msg_code       = 4;
+                        g_safety_msg_is_backoff = false;
+                        g_safety_msg_val        = i_trip;
+                    }
+                    finalizeSupervisor(false);
+                    return;
+                }
+            } else {
+                g_residual_spike_ticks = 0;
             }
         } else {
             g_residual_spike_ticks = 0;
         }
 
-        // 2d. Clonus rapid loaded velocity oscillation (>= 6 reversals within 1.0 s)
-        if (fabsf(g_omega_k_deg_s) >= 8.0f && fabsf(g_pad_force_n) >= 20.0f) {
+        // 2d. Clonus rapid velocity oscillation (>= 6 reversals of >= 1.5 deg within 1.0 s)
+        float v_thr   = (g_mode == MODE_ISOKINETIC) ? 12.0f : 10.0f;
+        bool  load_ok = (g_mode == MODE_ISOKINETIC)
+                        ? true
+                        : (fabsf(g_pad_force_n) >= 15.0f || fabsf(g_omega_k_deg_s) >= 18.0f);
+        if (fabsf(g_omega_k_deg_s) >= v_thr && load_ok) {
             int8_t vsign = (g_omega_k_deg_s > 0.0f) ? +1 : -1;
-            if (g_prev_vel_sign != 0 && vsign != g_prev_vel_sign) {
+            if (g_prev_vel_sign == 0) {
+                g_prev_vel_sign      = vsign;
+                s_clonus_last_rev_tk = g_theta_k_deg;
+            } else if (vsign != g_prev_vel_sign && fabsf(g_theta_k_deg - s_clonus_last_rev_tk) >= 1.5f) {
+                s_clonus_last_rev_tk = g_theta_k_deg;
+                g_prev_vel_sign      = vsign;
                 if (g_clonus_reversals == 0 || (uint32_t)(now_ms - g_clonus_window_start) > 1000U) {
                     g_clonus_window_start = now_ms;
                     g_clonus_reversals    = 1;
@@ -1574,23 +1667,24 @@ static void evaluateSafetySupervisor(uint32_t now_ms) {
                 if (g_clonus_reversals >= 6U) {
                     float rev_cnt = (float)g_clonus_reversals;
                     stopAllImmediate();
-                    g_spasm_latched        = true;
-                    g_espnow_fault_lockout = true;
-                    g_safety_msg_code      = 5;
-                    g_safety_msg_val       = rev_cnt;
-                    finalizeSupervisor();
+                    g_spasm_latched         = true;
+                    g_espnow_fault_lockout  = true;
+                    g_safety_msg_code       = 5;
+                    g_safety_msg_is_backoff = false;
+                    g_safety_msg_val        = rev_cnt;
+                    finalizeSupervisor(false);
                     return;
                 }
             }
-            g_prev_vel_sign = vsign;
         } else if (g_clonus_reversals > 0 && (uint32_t)(now_ms - g_clonus_window_start) > 1200U) {
             g_clonus_reversals = 0;
         }
     } else {
         g_residual_spike_ticks = 0;
+        s_spasm_dfdt_ticks     = 0;
     }
 
-    finalizeSupervisor();
+    finalizeSupervisor(active_sup);
 }
 
 // ----------------------------------------------------------------------------
@@ -1785,31 +1879,39 @@ static void processPendingEspNowCmd(uint32_t now_ms) {
 
     bool is_oneshot_op = (pkt.op_mode == OP_SETUP_FULL_25S ||
                           pkt.op_mode == OP_SETUP_QUICK_6S ||
-                          pkt.op_mode == OP_AUTO_BENCH_TEST);
+                          pkt.op_mode == OP_AUTO_BENCH_TEST ||
+                          pkt.op_mode == OP_PARK_HOME);
     if (!is_oneshot_op) {
         g_espnow_oneshot_latched = false;
     }
 
     // 2. Local CLI Priority Arbitration: background OP_IDLE heartbeats never interrupt local bench tests
+    //    or active CPM 4-deg spasm relief backoff; preserve spasm/fault flags until explicit release.
     if (pkt.op_mode == OP_IDLE) {
-        g_espnow_fault_lockout = false;
-        if (g_ctrl_from_espnow || g_spasm_latched) {
+        if (g_in_spasm_backoff && g_mode == MODE_CPM) {
+            return;
+        }
+        if (g_ctrl_from_espnow && g_mode != MODE_IDLE) {
+            bool keep_spasm = g_spasm_latched;
+            bool keep_fault = g_espnow_fault_lockout;
             stopAllImmediate();
-            g_spasm_latched = false;
+            g_spasm_latched        = keep_spasm;
+            g_espnow_fault_lockout = keep_fault;
         }
         return;
     }
 
     // 3. Safety Lockout: refuse to auto-restart motor on 10Hz heartbeats after a spasm or fault
-    //    until U1 Master explicitly acknowledges via OP_IDLE or ESTOP_HARD_STOP_RELEASE
+    //    until U1 Master explicitly acknowledges via ESTOP_HARD_STOP_RELEASE
     if (g_espnow_fault_lockout || g_spasm_latched) {
         return;
     }
 
-    // Require valid homing before Master enters clinical closed-loop therapy modes
+    // Require valid homing before Master enters clinical closed-loop therapy or setup GOTO modes
     bool needs_home = (pkt.op_mode == OP_CPM || pkt.op_mode == OP_ISOTONIC ||
                        pkt.op_mode == OP_ISOKINETIC || pkt.op_mode == OP_ISOMETRIC ||
-                       pkt.op_mode == OP_ACTIVE_ASSIST);
+                       pkt.op_mode == OP_ACTIVE_ASSIST || pkt.op_mode == OP_GOTO_START ||
+                       pkt.op_mode == OP_PARK_HOME);
     if (needs_home && !g_is_homed) {
         g_espnow_evt_code = 2;
         return;
@@ -1860,6 +1962,47 @@ static void processPendingEspNowCmd(uint32_t now_ms) {
             break;
         }
 
+        case OP_GOTO_START: {
+            float goal = constrain(g_rom_min_deg, ROM_ABS_MIN_DEG, ROM_ABS_MAX_DEG);
+            g_ctrl_from_espnow = true;
+            if (g_mode != MODE_GOTO || g_goto_auto_release || fabsf(g_goto_goal_tk - goal) > 0.5f) {
+                g_spasm_latched     = false;
+                g_in_spasm_backoff  = false;
+                g_cpm_approaching   = false;
+                g_traj_target_tk    = g_theta_k_deg;
+                g_goto_goal_tk      = goal;
+                g_goto_speed_degs   = SETUP_POS_SPEED_DEGS;
+                g_goto_max_i_a      = SETUP_POS_MAX_I_A;
+                g_goto_auto_release = false;
+                g_goto_settle_ms    = now_ms;
+                g_goto_reached_sent = false;
+                g_obst_ticks        = 0;
+                g_motion_msg_code   = 0;
+                g_mode              = MODE_GOTO;
+            }
+            break;
+        }
+
+        case OP_PARK_HOME: {
+            if (!g_espnow_oneshot_latched && !(g_mode == MODE_GOTO && g_goto_auto_release && g_ctrl_from_espnow)) {
+                stopAllImmediate();
+                g_spasm_latched          = false;
+                g_ctrl_from_espnow       = true;
+                g_espnow_oneshot_latched = true;
+                g_traj_target_tk         = g_theta_k_deg;
+                g_goto_goal_tk           = PARK_HOME_TARGET_DEG;
+                g_goto_speed_degs        = SETUP_POS_SPEED_DEGS;
+                g_goto_max_i_a           = SETUP_POS_MAX_I_A;
+                g_goto_auto_release      = true;
+                g_goto_settle_ms         = now_ms;
+                g_goto_reached_sent      = false;
+                g_obst_ticks             = 0;
+                g_motion_msg_code        = 0;
+                g_mode                   = MODE_GOTO;
+            }
+            break;
+        }
+
         case OP_CPM: {
             g_cpm_speed_degs    = constrain(isfinite(pkt.target_vel_deg_s) ? pkt.target_vel_deg_s : DEFAULT_CPM_SPEED_DEGS, 3.0f, 60.0f);
             if (isfinite(pkt.target_torque_ext) && pkt.target_torque_ext >= 4.0f) {
@@ -1875,8 +2018,9 @@ static void processPendingEspNowCmd(uint32_t now_ms) {
                 g_spasm_latched    = false;
                 g_in_spasm_backoff = false;
                 g_cpm_done_cycles  = 0;
-                g_traj_target_tk   = constrain(g_theta_k_deg, g_rom_min_deg, g_rom_max_deg);
-                g_cpm_phase        = (g_traj_target_tk >= g_rom_max_deg - 2.0f) ? 2 : 0;
+                g_traj_target_tk   = g_theta_k_deg;
+                g_cpm_approaching  = (g_theta_k_deg < (g_rom_min_deg - 3.0f)) || (g_theta_k_deg > (g_rom_max_deg + 3.0f));
+                g_cpm_phase        = (!g_cpm_approaching && g_theta_k_deg >= g_rom_max_deg - 2.0f) ? 2 : 0;
                 g_cpm_dwell_ms     = now_ms;
                 g_obst_ticks       = 0;
                 g_motion_msg_code  = 0;
@@ -1900,6 +2044,23 @@ static void processPendingEspNowCmd(uint32_t now_ms) {
             g_assist_auto_cycle = false;
             g_ctrl_from_espnow  = true;
             if (g_mode != MODE_ACTIVE_ASSIST) {
+                if (g_theta_k_deg < (g_rom_min_deg - 4.0f) || g_theta_k_deg > (g_rom_max_deg + 4.0f)) {
+                    float goal = constrain(g_rom_min_deg, ROM_ABS_MIN_DEG, ROM_ABS_MAX_DEG);
+                    if (g_mode != MODE_GOTO || g_goto_auto_release || fabsf(g_goto_goal_tk - goal) > 0.5f) {
+                        g_spasm_latched     = false;
+                        g_traj_target_tk    = g_theta_k_deg;
+                        g_goto_goal_tk      = goal;
+                        g_goto_speed_degs   = SETUP_POS_SPEED_DEGS;
+                        g_goto_max_i_a      = SETUP_POS_MAX_I_A;
+                        g_goto_auto_release = false;
+                        g_goto_settle_ms    = now_ms;
+                        g_goto_reached_sent = false;
+                        g_obst_ticks        = 0;
+                        g_motion_msg_code   = 0;
+                        g_mode              = MODE_GOTO;
+                    }
+                    break;
+                }
                 g_spasm_latched    = false;
                 g_assist_anchor_tk = g_theta_k_deg;
                 g_traj_target_tk   = constrain(g_theta_k_deg, g_rom_min_deg, g_rom_max_deg);
@@ -1918,6 +2079,23 @@ static void processPendingEspNowCmd(uint32_t now_ms) {
             g_iso_flex_nm      = constrain(isfinite(pkt.target_torque_flex) ? pkt.target_torque_flex : DEFAULT_ISO_FLEX_NM, 0.0f, 45.0f);
             g_ctrl_from_espnow = true;
             if (g_mode != MODE_ISOTONIC) {
+                if (g_theta_k_deg < (g_rom_min_deg - 8.0f) || g_theta_k_deg > (g_rom_max_deg + 8.0f)) {
+                    float goal = constrain(g_rom_min_deg, ROM_ABS_MIN_DEG, ROM_ABS_MAX_DEG);
+                    if (g_mode != MODE_GOTO || g_goto_auto_release || fabsf(g_goto_goal_tk - goal) > 0.5f) {
+                        g_spasm_latched     = false;
+                        g_traj_target_tk    = g_theta_k_deg;
+                        g_goto_goal_tk      = goal;
+                        g_goto_speed_degs   = SETUP_POS_SPEED_DEGS;
+                        g_goto_max_i_a      = SETUP_POS_MAX_I_A;
+                        g_goto_auto_release = false;
+                        g_goto_settle_ms    = now_ms;
+                        g_goto_reached_sent = false;
+                        g_obst_ticks        = 0;
+                        g_motion_msg_code   = 0;
+                        g_mode              = MODE_GOTO;
+                    }
+                    break;
+                }
                 g_spasm_latched    = false;
                 g_last_torque_sign = 0;
                 resetRepAccumulators();
@@ -1934,6 +2112,23 @@ static void processPendingEspNowCmd(uint32_t now_ms) {
             g_isok_flex_cap_nm = constrain(f_cap, 0.0f, 45.0f);
             g_ctrl_from_espnow = true;
             if (g_mode != MODE_ISOKINETIC) {
+                if (g_theta_k_deg < (g_rom_min_deg - 8.0f) || g_theta_k_deg > (g_rom_max_deg + 8.0f)) {
+                    float goal = constrain(g_rom_min_deg, ROM_ABS_MIN_DEG, ROM_ABS_MAX_DEG);
+                    if (g_mode != MODE_GOTO || g_goto_auto_release || fabsf(g_goto_goal_tk - goal) > 0.5f) {
+                        g_spasm_latched     = false;
+                        g_traj_target_tk    = g_theta_k_deg;
+                        g_goto_goal_tk      = goal;
+                        g_goto_speed_degs   = SETUP_POS_SPEED_DEGS;
+                        g_goto_max_i_a      = SETUP_POS_MAX_I_A;
+                        g_goto_auto_release = false;
+                        g_goto_settle_ms    = now_ms;
+                        g_goto_reached_sent = false;
+                        g_obst_ticks        = 0;
+                        g_motion_msg_code   = 0;
+                        g_mode              = MODE_GOTO;
+                    }
+                    break;
+                }
                 g_spasm_latched    = false;
                 g_last_torque_sign = 0;
                 resetRepAccumulators();
@@ -2027,6 +2222,10 @@ static void sendEspNowTelemetry50Hz() {
     if (g_mode == MODE_HARDSTOP_LOCK || g_hardstop_locked) telem.state_flags |= STATE_FLAG_HARDSTOP_LOCKED;
     if (g_espnow_fault_lockout)                          telem.state_flags |= STATE_FLAG_FAULT_LOCKOUT;
     if (g_mode == MODE_AUTOHOME)                         telem.state_flags |= STATE_FLAG_BUSY_HOMING;
+    if ((g_mode == MODE_GOTO && !g_goto_reached_sent) ||
+        (g_mode == MODE_CPM && g_cpm_approaching)) {
+        telem.state_flags |= STATE_FLAG_POSITIONING;
+    }
     telem.current_rep        = (g_rep_count > 65535U) ? (uint16_t)65535U : (uint16_t)g_rep_count;
     telem.knee_angle_deg     = g_theta_k_deg;
     telem.knee_vel_deg_s     = g_omega_k_deg_s;
@@ -2364,13 +2563,14 @@ static void runControlStep500Hz() {
                         }
                     }
                 }
+                
             } else if (g_home_phase == 2) {
                 applyMotorOutput(0, 0);
                 if ((uint32_t)(now_ms - g_home_phase_ms) >= 250U) {
                     latchEncoderAngleDeg(mapKneeToArmAngleDeg(0.0f, g_d_offset_m, g_L_leg_m));
                     g_theta_k_deg   = 0.0f;
                     g_is_homed      = true;
-                    g_home_park_deg = constrain(g_rom_min_deg, 3.0f, 15.0f);
+                    g_home_park_deg = AUTOHOME_BACKOFF_DEG;
                     g_home_phase    = 3;
                     g_home_phase_ms = now_ms;
                 }
@@ -2406,33 +2606,48 @@ static void runControlStep500Hz() {
                 ref_wk            = -g_goto_speed_degs;
             }
 
-            if (fabsf(g_traj_target_tk - g_theta_k_deg) > 15.0f) {
-                if (g_obst_ticks < 1000) g_obst_ticks++;
-                if (g_obst_ticks >= 750) { // 1.5s blocked
-                    stopAllImmediate();
-                    g_espnow_fault_lockout = true;
-                    g_motion_msg_code      = 2;
-                    g_motion_msg_val       = g_theta_k_deg;
-                    updateBrakeChopper(g_vbus_volts);
-                    break;
+            if (!g_goto_reached_sent) {
+                bool pos_obst  = fabsf(g_traj_target_tk - g_theta_k_deg) > 10.0f;
+                bool stall_cur = g_acs_valid && fabsf(g_omega_k_deg_s) < 1.5f &&
+                                 fabsf(g_motor_current_a) > 4.5f &&
+                                 fabsf(g_traj_target_tk - g_theta_k_deg) > 3.0f;
+                if (pos_obst || stall_cur) {
+                    if (g_obst_ticks < 1000U) g_obst_ticks++;
+                    uint16_t lim = stall_cur ? 200U : 300U; // 400ms stalled current or 600ms lag
+                    if (g_obst_ticks >= lim) {
+                        stopAllImmediate();
+                        g_espnow_fault_lockout = true;
+                        g_motion_msg_code      = 2;
+                        g_motion_msg_val       = g_theta_k_deg;
+                        updateBrakeChopper(g_vbus_volts);
+                        break;
+                    }
+                } else {
+                    g_obst_ticks = 0;
+                }
+
+                if (fabsf(g_traj_target_tk - g_goto_goal_tk) < 0.05f &&
+                    fabsf(g_theta_k_deg - g_goto_goal_tk) <= 2.0f) {
+                    if ((uint32_t)(millis() - g_goto_settle_ms) >= 250U) {
+                        g_goto_reached_sent = true;
+                        g_obst_ticks        = 0;
+                        g_motion_msg_code   = 1;
+                        g_motion_msg_val    = g_theta_k_deg;
+                        if (g_goto_auto_release) {
+                            stopAllImmediate();
+                            updateBrakeChopper(g_vbus_volts);
+                            break;
+                        }
+                    }
+                } else {
+                    g_goto_settle_ms = millis();
                 }
             } else {
                 g_obst_ticks = 0;
             }
 
-            if (!g_goto_reached_sent &&
-                fabsf(g_traj_target_tk - g_goto_goal_tk) < 0.05f &&
-                fabsf(g_theta_k_deg - g_goto_goal_tk) <= 1.5f) {
-                if ((uint32_t)(millis() - g_goto_settle_ms) >= 250U) {
-                    g_goto_reached_sent = true;
-                    g_motion_msg_code   = 1;
-                    g_motion_msg_val    = g_theta_k_deg;
-                }
-            } else {
-                g_goto_settle_ms = millis();
-            }
-
-            float i_cmd = computePositionAssistCurrent(g_traj_target_tk, ref_wk, 0, g_assist_max_i_a);
+            float hold_cap_i = g_goto_reached_sent ? DEFAULT_ASSIST_MAX_I_A : g_goto_max_i_a;
+            float i_cmd = computePositionAssistCurrent(g_traj_target_tk, ref_wk, 0, hold_cap_i);
             executeBidirectionalCurrentControl(i_cmd, g_omega_m_deg_s);
             updateBrakeChopper(g_vbus_volts);
             break;
@@ -2463,9 +2678,59 @@ static void runControlStep500Hz() {
                      (uint32_t)(now_ms - g_cpm_dwell_ms) >= 350U) ||
                     (uint32_t)(now_ms - g_cpm_dwell_ms) >= 1500U) {
                     bool keep_spasm = g_spasm_latched;
+                    bool keep_fault = g_espnow_fault_lockout;
                     stopAllImmediate();
-                    g_spasm_latched = keep_spasm;
+                    g_spasm_latched        = keep_spasm;
+                    g_espnow_fault_lockout = keep_fault;
                 }
+                break;
+            }
+
+            if (g_cpm_approaching) {
+                float err_app  = g_rom_min_deg - g_traj_target_tk;
+                float app_step = SETUP_POS_SPEED_DEGS * CONTROL_DT_SEC;
+                if (fabsf(err_app) <= app_step) {
+                    g_traj_target_tk = g_rom_min_deg;
+                    ref_wk           = 0.0f;
+                } else if (err_app > 0.0f) {
+                    g_traj_target_tk += app_step;
+                    ref_wk            = SETUP_POS_SPEED_DEGS;
+                } else {
+                    g_traj_target_tk -= app_step;
+                    ref_wk            = -SETUP_POS_SPEED_DEGS;
+                }
+
+                bool pos_obst  = fabsf(g_traj_target_tk - g_theta_k_deg) > 10.0f;
+                bool stall_cur = g_acs_valid && fabsf(g_omega_k_deg_s) < 1.5f &&
+                                 fabsf(g_motor_current_a) > 4.5f &&
+                                 fabsf(g_traj_target_tk - g_theta_k_deg) > 3.0f;
+                if (pos_obst || stall_cur) {
+                    if (g_obst_ticks < 1000U) g_obst_ticks++;
+                    uint16_t lim = stall_cur ? 200U : 300U;
+                    if (g_obst_ticks >= lim) {
+                        stopAllImmediate();
+                        g_espnow_fault_lockout = true;
+                        g_motion_msg_code      = 4;
+                        g_motion_msg_val       = g_theta_k_deg;
+                        updateBrakeChopper(g_vbus_volts);
+                        break;
+                    }
+                } else {
+                    g_obst_ticks = 0;
+                }
+
+                if (fabsf(g_theta_k_deg - g_rom_min_deg) <= 2.0f &&
+                    fabsf(g_traj_target_tk - g_rom_min_deg) < 0.5f) {
+                    g_cpm_approaching = false;
+                    g_cpm_phase       = 0;
+                    g_obst_ticks      = 0;
+                    g_traj_target_tk  = g_rom_min_deg;
+                    resetRepAccumulators();
+                }
+
+                float i_app = computePositionAssistCurrent(g_traj_target_tk, ref_wk, 0, SETUP_POS_MAX_I_A);
+                executeBidirectionalCurrentControl(i_app, g_omega_m_deg_s);
+                updateBrakeChopper(g_vbus_volts);
                 break;
             }
 
@@ -2682,9 +2947,11 @@ static void runControlStep500Hz() {
             }
 
             if (g_theta_k_deg > g_rom_max_deg) {
-                tau_knee_cmd -= 1.2f * (g_theta_k_deg - g_rom_max_deg);
+                float wall = constrain(1.2f * (g_theta_k_deg - g_rom_max_deg) + 0.08f * fmaxf(0.0f, wk), 0.0f, 14.0f);
+                tau_knee_cmd -= wall;
             } else if (g_theta_k_deg < g_rom_min_deg) {
-                tau_knee_cmd += 1.2f * (g_rom_min_deg - g_theta_k_deg);
+                float wall = constrain(1.2f * (g_rom_min_deg - g_theta_k_deg) + 0.08f * fmaxf(0.0f, -wk), 0.0f, 14.0f);
+                tau_knee_cmd += wall;
             }
 
             float i_cmd = constrain((tau_knee_cmd * g_gamma_factor) / kt_gbx,
@@ -2721,9 +2988,11 @@ static void runControlStep500Hz() {
             }
 
             if (g_theta_k_deg > g_rom_max_deg) {
-                tau_knee_cmd -= 1.2f * (g_theta_k_deg - g_rom_max_deg);
+                float wall = constrain(1.2f * (g_theta_k_deg - g_rom_max_deg) + 0.08f * fmaxf(0.0f, wk), 0.0f, 14.0f);
+                tau_knee_cmd -= wall;
             } else if (g_theta_k_deg < g_rom_min_deg) {
-                tau_knee_cmd += 1.2f * (g_rom_min_deg - g_theta_k_deg);
+                float wall = constrain(1.2f * (g_rom_min_deg - g_theta_k_deg) + 0.08f * fmaxf(0.0f, -wk), 0.0f, 14.0f);
+                tau_knee_cmd += wall;
             }
 
             float i_cmd = constrain((tau_knee_cmd * g_gamma_factor) / kt_gbx,
@@ -2789,19 +3058,19 @@ static void printHelp() {
                   MOTOR_BIDIRECTIONAL_ENABLED ? "BIDIR" : "REV-ONLY",
                   (unsigned long)g_md_pwm_freq_hz);
     Serial.println("Commands:");
-    Serial.println("  autohome            : Self-home against STOP1 (0 deg) & park at ROM min -> H:1");
+    Serial.println("  autohome            : Self-home against STOP1 (0 deg) & park at 3 deg -> H:1");
     Serial.println("  cpm [spd] [cycles]  : Continuous Passive Motion within ROM (default 18 deg/s)");
     Serial.println("  assist [auto] [spd] : Active Assist (wait patient nudge, yield-forward; or 'assist auto')");
-    Serial.println("  goto <deg> [spd]    : Closed-loop move & hold at knee deg (0..120 deg)");
+    Serial.println("  goto <deg> [spd]    : Closed-loop move & hold at knee deg (0..180 deg)");
     Serial.println("  iso [extNm] [flexNm]: Clinical Isotonic curve resistance (default 18 / 12 Nm; 0=free)");
     Serial.println("  isok [vel] [e] [f]  : Accommodating Isokinetic ceiling (default 45 deg/s, 18/12 Nm)");
-    Serial.println("  isom [deg] [maxNm]  : Multi-angle Isometric hold (default 60 deg, 25 Nm)");
-    Serial.println("  path [std|acl|tka|pfps] : Pathology torque curve (acl tapers 40->0 deg ext shear)");
+    Serial.println("  isom [deg] [maxNm]  : Multi-angle Isometric hold (default 150 deg, 25 Nm)");
+    Serial.println("  path [std|acl|tka|pfps] : Pathology torque curve (acl tapers near rom_min ext shear)");
     Serial.println("  lock / release      : Compliant electronic hard-stop (75N yield) / zero-torque release");
     Serial.println("  safety [on|off]     : Toggle clinical spasm/catch/clonus detectors (HW OC/OV/EStop ON)");
     Serial.println("  wifi [on|off|ch N]  : Enable/disable ESP-NOW Wi-Fi or set channel 1..13 (saved NVS)");
     Serial.println("  espnow              : Show U2 MAC, U1 Master link state & ESP-NOW TX/RX counters");
-    Serial.println("  rom [min max|reset] : Show or set soft ROM limits (deg, default 5..90) -> NVS");
+    Serial.println("  rom [min max|reset] : Show or set soft ROM limits (deg, default 120..180) -> NVS");
     Serial.println("  assistcfg [kp kd Imax [grav]] : Show/tune knee PD, Imax & gravity FF (or 'reset')");
     Serial.printf("  iref <%.0f..%.0f>     : Closed-loop signed current (A; >%.0fA <%.0fs surge); 'iref 0' -> IDLE\n",
                   -PEAK_CURRENT_LIMIT_A, PEAK_CURRENT_LIMIT_A, CONT_CURRENT_LIMIT_A, PEAK_SURGE_MAX_S);
@@ -2966,10 +3235,10 @@ static void handleCommand(char *line) {
     } else if (strncmp(line, "home", 4) == 0 && (line[4] == ' ' || line[4] == '\0')) {
         float known_tk = 0.0f;
         if (!parseOptionalFloat(&line[4], 0.0f, &known_tk)) {
-            Serial.println("[CMD] Usage: home [0..125]");
+            Serial.println("[CMD] Usage: home [0..180]");
             return;
         }
-        known_tk = constrain(known_tk, 0.0f, 125.0f);
+        known_tk = constrain(known_tk, ROM_ABS_MIN_DEG, ROM_ABS_MAX_DEG);
         float known_tm = mapKneeToArmAngleDeg(known_tk, g_d_offset_m, g_L_leg_m);
         latchEncoderAngleDeg(known_tm);
         g_theta_k_deg = known_tk;
@@ -3368,12 +3637,15 @@ static void handleCommand(char *line) {
         g_traj_target_tk    = g_theta_k_deg;
         g_goto_goal_tk      = goal_tk;
         g_goto_speed_degs   = spd;
+        g_goto_max_i_a      = g_assist_max_i_a;
+        g_goto_auto_release = false;
         g_goto_settle_ms    = millis();
         g_goto_reached_sent = false;
+        g_obst_ticks        = 0;
         g_motion_msg_code   = 0;
         g_mode              = MODE_GOTO;
         Serial.printf("[GOTO] Moving Tk=%.1f -> %.1f deg @ %.1f deg/s (Imax=%.1f A; 's' to stop)\n",
-                      g_theta_k_deg, g_goto_goal_tk, g_goto_speed_degs, g_assist_max_i_a);
+                      g_theta_k_deg, g_goto_goal_tk, g_goto_speed_degs, g_goto_max_i_a);
     } else if (strncmp(line, "cpm", 3) == 0 && (line[3] == ' ' || line[3] == '\0')) {
         if (!g_is_homed) {
             Serial.println("[CPM] Blocked: device not homed. Run 'autohome' (or 'home <deg>') first.");
@@ -3404,13 +3676,16 @@ static void handleCommand(char *line) {
         g_cpm_speed_degs    = spd;
         g_cpm_target_cycles = cyc;
         g_cpm_done_cycles   = 0;
-        g_traj_target_tk    = constrain(g_theta_k_deg, g_rom_min_deg, g_rom_max_deg);
-        g_cpm_phase         = (g_theta_k_deg >= (g_rom_max_deg - 2.0f)) ? 2 : 0;
+        g_traj_target_tk    = g_theta_k_deg;
+        g_cpm_approaching   = (g_theta_k_deg < (g_rom_min_deg - 3.0f)) || (g_theta_k_deg > (g_rom_max_deg + 3.0f));
+        g_cpm_phase         = (!g_cpm_approaching && g_theta_k_deg >= (g_rom_max_deg - 2.0f)) ? 2 : 0;
+        g_obst_ticks        = 0;
         g_motion_msg_code   = 0;
         resetRepAccumulators();
         g_mode = MODE_CPM;
-        Serial.printf("[CPM] Running ROM %.1f..%.1f deg @ %.1f deg/s (%d cycles, 0=cont; Imax=%.1f A; 's' to stop)\n",
-                      g_rom_min_deg, g_rom_max_deg, g_cpm_speed_degs, g_cpm_target_cycles, g_assist_max_i_a);
+        Serial.printf("[CPM] Running ROM %.1f..%.1f deg @ %.1f deg/s (%d cycles, 0=cont; Imax=%.1f A%s; 's' to stop)\n",
+                      g_rom_min_deg, g_rom_max_deg, g_cpm_speed_degs, g_cpm_target_cycles, g_assist_max_i_a,
+                      g_cpm_approaching ? "; slow approach first" : "");
     } else if (strncmp(line, "assist", 6) == 0 && (line[6] == ' ' || line[6] == '\0')) {
         if (!g_is_homed) {
             Serial.println("[ASSIST] Blocked: device not homed. Run 'autohome' (or 'home <deg>') first.");
@@ -3482,6 +3757,11 @@ static void handleCommand(char *line) {
                 }
             }
         }
+        if (g_theta_k_deg < (g_rom_min_deg - 8.0f) || g_theta_k_deg > (g_rom_max_deg + 8.0f)) {
+            Serial.printf("[ISO] Blocked: arm (Tk=%.1f deg) is outside ROM (%.1f..%.1f deg). Run 'goto %.0f 10' first.\n",
+                          g_theta_k_deg, g_rom_min_deg, g_rom_max_deg, g_rom_min_deg);
+            return;
+        }
         stopAllImmediate();
         g_spasm_latched = false;
         g_iso_ext_nm    = ext_nm;
@@ -3526,6 +3806,11 @@ static void handleCommand(char *line) {
                 }
             }
         }
+        if (g_theta_k_deg < (g_rom_min_deg - 8.0f) || g_theta_k_deg > (g_rom_max_deg + 8.0f)) {
+            Serial.printf("[ISOK] Blocked: arm (Tk=%.1f deg) is outside ROM (%.1f..%.1f deg). Run 'goto %.0f 10' first.\n",
+                          g_theta_k_deg, g_rom_min_deg, g_rom_max_deg, g_rom_min_deg);
+            return;
+        }
         stopAllImmediate();
         g_spasm_latched    = false;
         g_isok_vel_degs    = vel;
@@ -3558,7 +3843,8 @@ static void handleCommand(char *line) {
                 char *p2 = nullptr;
                 max_nm = strtof(p1, &p2);
                 if (p2 == p1 || !isfinite(max_nm) || max_nm < 1.0f || max_nm > 45.0f) {
-                    Serial.println("[CMD] Usage: isom [angle 0..120 deg] [max_Nm 1..45]");
+                    Serial.printf("[CMD] Usage: isom [angle %.0f..%.0f deg] [max_Nm 1..45]\n",
+                                  ROM_ABS_MIN_DEG, ROM_ABS_MAX_DEG);
                     return;
                 }
             }
@@ -3897,7 +4183,7 @@ void loop() {
         } else if (evt == 2) {
             Serial.println("[ESPNOW] Therapy command blocked: Top-Hub is not homed (H:0). Send 'HOME'/'Set 0 deg Home' or 'AUTOHOME' first.");
         } else if (evt == 3) {
-            Serial.println("[ESPNOW] Master U1 heartbeat timeout (>500 ms) — motor stopped to MODE_IDLE.");
+            Serial.println("[ESPNOW] U1 Master heartbeat timeout (>4000 ms) — scanning channels 1..13...");
         }
     }
 
@@ -3928,9 +4214,10 @@ void loop() {
         float   val  = g_motion_msg_val;
         g_motion_msg_code = 0;
         if (code == 1) {
-            Serial.printf("[GOTO] Reached Tk=%.2f deg (holding target; send 's' to release).\n", val);
+            Serial.printf("[GOTO] Reached Tk=%.2f deg -> %s\n", val,
+                          g_goto_auto_release ? "parked & released to IDLE." : "holding target (send 's' to release).");
         } else if (code == 2) {
-            Serial.printf("[GOTO] Stopped: obstruction/stall (>15 deg error at Tk=%.2f deg) -> IDLE.\n", val);
+            Serial.printf("[GOTO] Stopped: obstruction/stall at Tk=%.2f deg -> IDLE.\n", val);
         } else if (code == 3) {
             Serial.printf("[CPM] Completed %.0f cycle(s) -> IDLE.\n", val);
         } else if (code == 4) {
@@ -3967,19 +4254,23 @@ void loop() {
     }
 
     if (g_safety_msg_code != 0) {
-        uint8_t code = g_safety_msg_code;
-        float   val  = g_safety_msg_val;
-        g_safety_msg_code = 0;
+        uint8_t code       = g_safety_msg_code;
+        bool    is_backoff = g_safety_msg_is_backoff;
+        float   val        = g_safety_msg_val;
+        g_safety_msg_code       = 0;
+        g_safety_msg_is_backoff = false;
         if (code == 1) {
             Serial.printf("[SAFETY] ABS OVERVOLTAGE FAULT (VBUS=%.2f V > %.1f V) -> IDLE & Chopper 100%%!\n",
                           val, VBUS_ABS_OV_FAULT_V);
         } else if (code == 2) {
-            Serial.printf("[SAFETY] Spasm rapid force transient detected (dF/dt=%.0f N/s, F=%+.1f N, I=%+.2f A, raw=%.1f mV) -> IDLE (spasm latched).\n",
-                          val, g_safety_trip_f_n, g_safety_trip_i_a, g_safety_trip_mv);
+            Serial.printf("[SAFETY] Spasm rapid force transient detected (dF/dt=%.0f N/s, F=%+.1f N, I=%+.2f A, raw=%.1f mV) -> %s\n",
+                          val, g_safety_trip_f_n, g_safety_trip_i_a, g_safety_trip_mv,
+                          is_backoff ? "CPM 4 deg relief backoff." : "IDLE (spasm latched).");
         } else if (code == 3) {
             Serial.printf("[SAFETY] CPM joint-catch at Tk=%.1f deg -> 4 deg relief backoff.\n", val);
         } else if (code == 4) {
-            Serial.printf("[SAFETY] Residual current spike while stalled (I=%.2f A) -> IDLE (spasm latched).\n", val);
+            Serial.printf("[SAFETY] Residual current spike while stalled (I=%.2f A) -> %s\n",
+                          val, is_backoff ? "CPM 4 deg relief backoff." : "IDLE (spasm latched).");
         } else if (code == 5) {
             Serial.printf("[SAFETY] Clonus oscillation detected (%.0f reversals/s) -> IDLE (spasm latched).\n", val);
         } else if (code == 6) {
@@ -3989,21 +4280,6 @@ void loop() {
                           val, (g_L_leg_m > 0.05f) ? (HARDSTOP_LOCK_MAX_NM / g_L_leg_m) : 75.0f);
         } else if (code == 8) {
             Serial.printf("[SAFETY] Hard-Stop RELEASED at Tk=%.1f deg -> zero-torque MODE_IDLE.\n", val);
-        }
-    }
-
-    if (g_espnow_evt_code != 0) {
-        uint8_t code = g_espnow_evt_code;
-        g_espnow_evt_code = 0;
-        if (code == 1) {
-            Serial.printf("[ESPNOW] U1 Master LINKED (%02X:%02X:%02X:%02X:%02X:%02X) on Ch %u!\n",
-                          g_master_mac[0], g_master_mac[1], g_master_mac[2],
-                          g_master_mac[3], g_master_mac[4], g_master_mac[5],
-                          (unsigned)g_wifi_channel);
-        } else if (code == 2) {
-            Serial.println("[ESPNOW] Remote clinical mode rejected: U2 is UNHOMED (send SETUP/Auto-Home first).");
-        } else if (code == 3) {
-            Serial.println("[ESPNOW] U1 Master heartbeat timeout — scanning channels 1..13...");
         }
     }
 

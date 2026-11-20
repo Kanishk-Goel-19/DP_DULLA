@@ -307,6 +307,32 @@ test('Live /ws/device bridge relays commands, telemetry, torque updates, and ESP
   assert.equal(telemMsg.torque, 18.0)
   assert.equal(telemMsg.reps, 4)
 
+  // Flexion 120-180 deg setup, begin_exercise, park_home, and spasm telemetry relay cleanly
+  client.sendJson({ type: 'start_session', mode: 'passive', op_mode: 3, role: 'support', rom_min_deg: 120, rom_max_deg: 180, torque_nm: 12, target_vel_deg_s: 18 })
+  client.sendJson({ type: 'begin_exercise' })
+  client.sendJson({ type: 'park_home' })
+
+  const flexDeadline = Date.now() + 2000
+  while (mockEsp.receivedCommands.length < 5 && Date.now() < flexDeadline) {
+    await new Promise((r) => setTimeout(r, 20))
+  }
+  assert.equal(mockEsp.receivedCommands.length, 5)
+  assert.equal(mockEsp.receivedCommands[2].type, 'start_session')
+  assert.equal(mockEsp.receivedCommands[2].rom_min_deg, 120)
+  assert.equal(mockEsp.receivedCommands[2].rom_max_deg, 180)
+  assert.equal(mockEsp.receivedCommands[3].type, 'begin_exercise')
+  assert.equal(mockEsp.receivedCommands[4].type, 'park_home')
+
+  mockEsp.broadcast({ type: 'telemetry', mode: 'passive', setup_state: 'moving_to_start', setup_warning: 1, positioning: 1, knee_angle_deg: 45.0, spasm: 0 })
+  const setupMsg = await client.waitForMessage((m) => m.type === 'telemetry' && m.setup_state === 'moving_to_start')
+  assert.equal(setupMsg.setup_warning, 1)
+  assert.equal(setupMsg.positioning, 1)
+  assert.equal(setupMsg.knee_angle_deg, 45.0)
+
+  mockEsp.broadcast({ type: 'telemetry', mode: 'passive', spasm: 1, paused: 1 })
+  const spasmMsg = await client.waitForMessage((m) => m.type === 'telemetry' && m.spasm === 1)
+  assert.equal(spasmMsg.paused, 1)
+
   // Saving esp32 progress for verified user sets verifiedByDevice=true; unverified user gets false
   const saveOk = await fetch(`${baseUrl}/api/progress`, {
     method: 'POST',

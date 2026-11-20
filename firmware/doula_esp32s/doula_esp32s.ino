@@ -44,8 +44,8 @@ const uint16_t WS_PORT    = 81;
 // while synthesizing cycling RPM/speed/torque around targetTorqueNm for the cycling HUD.
 #define CYCLING_RPM_FALLBACK_NO_ENC2   true
 
-// Automatically trigger OP_SETUP_QUICK_6S on an unhomed U2 before starting Flexion therapy.
-#define AUTO_HOME_U2_ON_START          true
+// Require explicit homing (Set 0 deg Home or Auto-Home STOP1) when U2 is unhomed (H:0).
+#define AUTO_HOME_U2_ON_START          false
 
 // Keep false while testing a bare ESP32-S board with nothing wired to GPIO4.
 // Flip to true once the physical active-LOW E-Stop pushbutton is wired to GPIO4 + GND.
@@ -81,8 +81,8 @@ struct SessionState {
   float liveTorqueNm       = 0.0f;   // Measured/simulated applied torque
   int   targetReps         = 15;
   int   completedReps      = 0;
-  float romMinDeg          = 0.0f;
-  float romMaxDeg          = 110.0f;
+  float romMinDeg          = 120.0f;
+  float romMaxDeg          = 180.0f;
   float dOffsetM           = 0.250f;
   float lLegM              = 0.300f;
 
@@ -150,7 +150,20 @@ TopHubRepSummaryPacket_t gLastRepSummary  = {};
 CyclingTelemetryPacket_t gCyclingTelem    = {};
 bool                     gHasRepSummary   = false;
 
-// Top-Hub session coordination state
+// Top-Hub session coordination & safe positioning state
+enum SetupPhase : uint8_t {
+  SETUP_NONE            = 0,
+  SETUP_AUTOHOME        = 1,
+  SETUP_MOVING_TO_START = 2,
+  SETUP_READY_AT_START  = 3,
+  SETUP_PARKING_HOME    = 4
+};
+
+SetupPhase setupPhase        = SETUP_NONE;
+uint32_t   setupStartedMs    = 0;
+bool       sawU2Positioning  = false;
+float      setupTargetDeg    = 120.0f;
+
 bool     pendingAutoHome     = false;
 uint8_t  postHomeOpMode      = OP_IDLE;
 uint32_t autoHomeStartedMs   = 0;
@@ -163,6 +176,25 @@ bool     repLimitAutoStopped = false;
 bool     u2FaultNotified     = false;
 bool     serialStreamTopHub  = false;
 uint32_t lastSerialStreamMs  = 0;
+
+const char* setupPhaseName(SetupPhase p) {
+  switch (p) {
+    case SETUP_AUTOHOME:        return "autohoming";
+    case SETUP_MOVING_TO_START: return "moving_to_start";
+    case SETUP_READY_AT_START:  return "ready_at_start";
+    case SETUP_PARKING_HOME:    return "parking_home";
+    case SETUP_NONE:
+    default:                    return "idle";
+  }
+}
+
+bool isSetupMotionWarningActive(uint8_t u2Flags) {
+  if ((u2Flags & (STATE_FLAG_BUSY_HOMING | STATE_FLAG_POSITIONING)) != 0) return true;
+  if (manualSetupOp == OP_SETUP_FULL_25S) return true;
+  return setupPhase == SETUP_AUTOHOME ||
+         setupPhase == SETUP_MOVING_TO_START ||
+         setupPhase == SETUP_PARKING_HOME;
+}
 
 // ============================================================================
 // 3. LIGHTWEIGHT JSON FIELD PARSERS & HELPERS
@@ -220,8 +252,9 @@ bool isCyclingMode(uint8_t opMode, const char* modeStr) {
 }
 
 float maxAllowedTorque(uint8_t opMode, const char* role) {
-  if (opMode == OP_CPM || strcmp(role, "support") == 0) return 25.0f;
-  return 85.0f;
+  if (isCyclingMode(opMode, "")) return 85.0f;
+  if (opMode == OP_CPM || opMode == OP_ACTIVE_ASSIST || strcmp(role, "support") == 0) return 25.0f;
+  return 45.0f;
 }
 
 uint8_t parsePathologyString(const String& pathStr) {
@@ -231,14 +264,15 @@ uint8_t parsePathologyString(const String& pathStr) {
   return PATH_STANDARD;
 }
 
-void sendWsAck(bool forwarded, const char* message) {
+void sendWsAck(bool forwarded, const char* message, const char* severity = "info") {
   if (webSocket.connectedClients() == 0 || !message) return;
-  char buf[256];
+  char buf[320];
   snprintf(
     buf,
     sizeof(buf),
-    "{\"type\":\"esp_ack\",\"forwarded\":%s,\"message\":\"%s\"}",
+    "{\"type\":\"esp_ack\",\"forwarded\":%s,\"severity\":\"%s\",\"message\":\"%s\"}",
     forwarded ? "true" : "false",
+    severity ? severity : "info",
     message
   );
   webSocket.broadcastTXT(buf);
@@ -374,6 +408,8 @@ uint8_t desiredTopHubOpMode() {
   if (gSession.estopped) return OP_IDLE;
   if (pendingAutoHome) return OP_SETUP_QUICK_6S;
   if (manualSetupOp != OP_IDLE) return manualSetupOp;
+  if (setupPhase == SETUP_MOVING_TO_START || setupPhase == SETUP_READY_AT_START) return OP_GOTO_START;
+  if (setupPhase == SETUP_PARKING_HOME) return OP_PARK_HOME;
   if (gSession.active && !gSession.paused && !isCyclingMode(gSession.opMode, gSession.modeName)) {
     if (repLimitAutoStopped) return OP_IDLE;
     return gSession.opMode;
@@ -441,6 +477,7 @@ void triggerHardStopReleaseBurst() {
   gSession.estopped = false;
   pendingAutoHome   = false;
   manualSetupOp     = OP_IDLE;
+  setupPhase        = SETUP_NONE;
   sendRehabCommand(NODE_TOPHUB, OP_IDLE, ESTOP_HARD_STOP_RELEASE, STEP_ACT_NONE, false, 2);
   sendRehabCommand(NODE_CYCLING, OP_IDLE, ESTOP_HARD_STOP_RELEASE, STEP_ACT_HOME, true, 2);
 }
@@ -460,16 +497,17 @@ void processTopHubQueues() {
       registerOrRefreshWorkerPeer(u2Peer, item.srcMac);
       gTopHubTelem = item.pkt;
 
-      bool isHomed     = (gTopHubTelem.state_flags & STATE_FLAG_HOMED) != 0;
-      bool isBusyHome  = (gTopHubTelem.state_flags & STATE_FLAG_BUSY_HOMING) != 0;
-      bool isHardStop  = (gTopHubTelem.state_flags & STATE_FLAG_HARDSTOP_LOCKED) != 0;
-      bool isSpasm     = (gTopHubTelem.state_flags & STATE_FLAG_SPASM_STOP) != 0;
-      bool isFaultLock = (gTopHubTelem.state_flags & STATE_FLAG_FAULT_LOCKOUT) != 0;
+      bool isHomed       = (gTopHubTelem.state_flags & STATE_FLAG_HOMED) != 0;
+      bool isBusyHome    = (gTopHubTelem.state_flags & STATE_FLAG_BUSY_HOMING) != 0;
+      bool isPositioning = (gTopHubTelem.state_flags & STATE_FLAG_POSITIONING) != 0;
+      bool isHardStop    = (gTopHubTelem.state_flags & STATE_FLAG_HARDSTOP_LOCKED) != 0;
+      bool isSpasm       = (gTopHubTelem.state_flags & STATE_FLAG_SPASM_STOP) != 0;
+      bool isFaultLock   = (gTopHubTelem.state_flags & STATE_FLAG_FAULT_LOCKOUT) != 0;
 
       // Always mirror live knee angle from U2
       gSession.kneeAngleDeg = gTopHubTelem.knee_angle_deg;
 
-      // 1. Auto-Home before starting Flexion therapy
+      // 1. Auto-Home before starting Flexion therapy (legacy compile-time flag if enabled)
       if (pendingAutoHome) {
         if (isBusyHome) sawU2BusyHoming = true;
         if (isHomed && !isBusyHome && (now - autoHomeStartedMs >= 150)) {
@@ -478,7 +516,7 @@ void processTopHubQueues() {
           gSession.opMode = postHomeOpMode;
           topHubRepBaseline = gTopHubTelem.current_rep;
           Serial.println("[U2] Auto-Home (0 deg) complete -> entering therapy mode");
-          sendWsAck(true, "Top-Hub homed (0 deg) — therapy started.");
+          sendWsAck(true, "Top-Hub homed (0 deg) — therapy started.", "info");
           sendRehabCommand(NODE_TOPHUB, desiredTopHubOpMode(), ESTOP_NORMAL, STEP_ACT_NONE, false, 2);
         } else if ((sawU2BusyHoming && !isBusyHome && !isHomed) ||
                    (now - autoHomeStartedMs > AUTOHOME_TIMEOUT_MS)) {
@@ -487,7 +525,7 @@ void processTopHubQueues() {
           gSession.active = false;
           gSession.paused = true;
           Serial.println("[U2] Auto-Home aborted or timed out — check STOP1 & 24V power");
-          sendWsAck(false, "Top-Hub auto-home aborted/timed out — check 24V power & STOP1.");
+          sendWsAck(true, "Top-Hub auto-home aborted/timed out — check 24V power & STOP1.", "fault");
           sendRehabCommand(NODE_TOPHUB, OP_IDLE, ESTOP_NORMAL, STEP_ACT_NONE, false, 1);
         }
       }
@@ -501,12 +539,14 @@ void processTopHubQueues() {
           if ((isHomed && !isBusyHome && elapsedSetup >= 220) || elapsedSetup > 4000) {
             manualSetupOp       = OP_IDLE;
             sawManualBusyHoming = false;
+            if (setupPhase == SETUP_AUTOHOME) setupPhase = SETUP_NONE;
             sendRehabCommand(NODE_TOPHUB, desiredTopHubOpMode(), ESTOP_NORMAL, STEP_ACT_NONE, false, 2);
             Serial.printf("[U2] Quick 0 deg Home complete (homed=%d, Tk=%.2f deg)\n",
                           isHomed ? 1 : 0, gTopHubTelem.knee_angle_deg);
-            sendWsAck(isHomed, isHomed
+            sendWsAck(true, isHomed
               ? "Top-Hub 0.0° Home & ACS712 zero latched (H:1)."
-              : "Top-Hub quick home timed out (check U2 link).");
+              : "Top-Hub quick home timed out (check U2 link).",
+              isHomed ? "info" : "warning");
           }
         } else if (manualSetupOp == OP_AUTO_BENCH_TEST) {
           if (elapsedSetup > 6500) {
@@ -514,7 +554,7 @@ void processTopHubQueues() {
             sawManualBusyHoming = false;
             sendRehabCommand(NODE_TOPHUB, desiredTopHubOpMode(), ESTOP_NORMAL, STEP_ACT_NONE, false, 2);
             Serial.println("[U2] Auto bench pulse test finished -> OP_IDLE");
-            sendWsAck(true, "Top-Hub bench pulse test finished.");
+            sendWsAck(true, "Top-Hub bench pulse test finished.", "info");
           }
         } else {
           bool abortedEarly = (!sawManualBusyHoming && !isBusyHome && elapsedSetup >= 2200);
@@ -522,19 +562,76 @@ void processTopHubQueues() {
               (elapsedSetup > MANUAL_SETUP_TIMEOUT_MS)) {
             manualSetupOp       = OP_IDLE;
             sawManualBusyHoming = false;
+            if (setupPhase == SETUP_AUTOHOME) setupPhase = SETUP_NONE;
             sendRehabCommand(NODE_TOPHUB, desiredTopHubOpMode(), ESTOP_NORMAL, STEP_ACT_NONE, false, 2);
             Serial.printf("[U2] Full Auto-Home finished (homed=%d, Tk=%.2f deg)\n",
                           isHomed ? 1 : 0, gTopHubTelem.knee_angle_deg);
-            sendWsAck(isHomed, isHomed
+            sendWsAck(true, isHomed
               ? "Top-Hub motorized Auto-Home complete (STOP1 latched)."
-              : "Top-Hub Auto-Home aborted — check 24V power (>=15V) & motor leads, or use Set 0° Home.");
+              : "Top-Hub Auto-Home aborted — check 24V power (>=15V) & motor leads, or use Set 0° Home.",
+              isHomed ? "info" : "warning");
           }
+        }
+      }
+
+      // 2B. Safe Two-Stage Setup Positioning (0->120 deg) and Safe Return to 0 deg Park
+      if (setupPhase == SETUP_MOVING_TO_START) {
+        if (isPositioning) sawU2Positioning = true;
+        uint32_t elapsedPos = now - setupStartedMs;
+        if (isHardStop || isSpasm || isFaultLock) {
+          setupPhase      = SETUP_NONE;
+          gSession.active = false;
+          gSession.paused = true;
+          if (isHardStop) gSession.estopped = true;
+          else sendRehabCommand(NODE_TOPHUB, OP_IDLE, ESTOP_NORMAL, STEP_ACT_NONE, false, 1);
+          Serial.println("[U2] Setup positioning stopped by safety/obstruction");
+          sendWsAck(true, "Setup stopped — obstruction or safety fault detected. Check clearance and try again.", "fault");
+        } else if (!isPositioning && fabsf(gTopHubTelem.knee_angle_deg - setupTargetDeg) <= 3.5f && elapsedPos >= 300) {
+          setupPhase = SETUP_READY_AT_START;
+          Serial.printf("[U2] Reached start position %.1f deg -> holding for leg placement & Begin Exercise\n",
+                        gTopHubTelem.knee_angle_deg);
+          sendWsAck(true, "Starting position reached — place your leg securely on the shin pad and click Begin Exercise.", "info");
+        } else if (elapsedPos > 25000) {
+          setupPhase      = SETUP_NONE;
+          gSession.active = false;
+          gSession.paused = true;
+          sendRehabCommand(NODE_TOPHUB, OP_IDLE, ESTOP_NORMAL, STEP_ACT_NONE, false, 2);
+          Serial.println("[U2] Setup positioning timed out");
+          sendWsAck(true, "Setup positioning timed out — check 24V power and clearance.", "fault");
+        }
+      } else if (setupPhase == SETUP_READY_AT_START) {
+        if (isHardStop || isSpasm || isFaultLock) {
+          setupPhase      = SETUP_NONE;
+          gSession.active = false;
+          gSession.paused = true;
+          if (isHardStop) gSession.estopped = true;
+          else sendRehabCommand(NODE_TOPHUB, OP_IDLE, ESTOP_NORMAL, STEP_ACT_NONE, false, 1);
+          sendWsAck(true, "Setup hold interrupted by safety fault — check clearance before retrying.", "fault");
+        }
+      } else if (setupPhase == SETUP_PARKING_HOME) {
+        if (isPositioning) sawU2Positioning = true;
+        uint32_t elapsedPark = now - setupStartedMs;
+        if (isHardStop || isSpasm || isFaultLock) {
+          setupPhase = SETUP_NONE;
+          if (isHardStop) gSession.estopped = true;
+          else sendRehabCommand(NODE_TOPHUB, OP_IDLE, ESTOP_NORMAL, STEP_ACT_NONE, false, 1);
+          sendWsAck(true, "Return to 0 deg Park interrupted by obstruction/safety stop.", "fault");
+        } else if (!isPositioning && gTopHubTelem.knee_angle_deg <= 4.5f && elapsedPark >= 300) {
+          setupPhase = SETUP_NONE;
+          sendRehabCommand(NODE_TOPHUB, OP_IDLE, ESTOP_NORMAL, STEP_ACT_NONE, false, 2);
+          Serial.printf("[U2] Parked safely at Tk=%.2f deg -> OP_IDLE\n", gTopHubTelem.knee_angle_deg);
+          sendWsAck(true, "Arm safely parked at 0 deg Home.", "info");
+        } else if (elapsedPark > 25000) {
+          setupPhase = SETUP_NONE;
+          sendRehabCommand(NODE_TOPHUB, OP_IDLE, ESTOP_NORMAL, STEP_ACT_NONE, false, 2);
+          sendWsAck(true, "Return to 0 deg Park timed out — motor released to IDLE.", "warning");
         }
       }
 
       // 3. Mirror U2 safety lockouts back to Master & WebSocket
       bool inFlexSession = gSession.active && !gSession.paused &&
-                           !isCyclingMode(gSession.opMode, gSession.modeName) && !pendingAutoHome;
+                           !isCyclingMode(gSession.opMode, gSession.modeName) &&
+                           !pendingAutoHome && setupPhase == SETUP_NONE;
       if (inFlexSession) {
         if (isHardStop) {
           gSession.estopped     = true;
@@ -543,7 +640,7 @@ void processTopHubQueues() {
           if (!u2FaultNotified) {
             u2FaultNotified = true;
             Serial.println("[U2 SAFETY] Hard-Stop locked on Top-Hub");
-            sendWsAck(false, "Top-Hub Hard-Stop locked — clear E-Stop to release.");
+            sendWsAck(true, "Top-Hub Hard-Stop locked — clear E-Stop to release.", "fault");
           }
           continue;
         }
@@ -554,9 +651,10 @@ void processTopHubQueues() {
             u2FaultNotified = true;
             Serial.printf("[U2 SAFETY] %s triggered -> session paused\n",
                           isSpasm ? "Spasm backoff" : "Fault lockout");
-            sendWsAck(false, isSpasm
+            sendWsAck(true, isSpasm
               ? "Top-Hub spasm guard triggered — press Resume or Stop."
-              : "Top-Hub fault lockout — check 24V/current & press Resume.");
+              : "Top-Hub fault lockout — check 24V/current & press Resume.",
+              isSpasm ? "spasm" : "fault");
             sendRehabCommand(NODE_TOPHUB, OP_IDLE, ESTOP_NORMAL, STEP_ACT_NONE, false, 1);
           }
           continue;
@@ -660,15 +758,23 @@ void serviceEspNowHeartbeats() {
 void sendTelemetryFrame() {
   if (webSocket.connectedClients() == 0) return;
 
-  uint8_t flags      = u2Peer.linked ? gTopHubTelem.state_flags : 0;
-  int     homed      = (flags & STATE_FLAG_HOMED) ? 1 : 0;
-  int     calibrated = (flags & STATE_FLAG_CALIBRATED) ? 1 : 0;
-  int     spasm      = (flags & STATE_FLAG_SPASM_STOP) ? 1 : 0;
-  int     hardLock   = (flags & STATE_FLAG_HARDSTOP_LOCKED) ? 1 : 0;
-  int     busyHoming = ((flags & STATE_FLAG_BUSY_HOMING) || pendingAutoHome || manualSetupOp == OP_SETUP_FULL_25S) ? 1 : 0;
-  int     faultLock  = (flags & STATE_FLAG_FAULT_LOCKOUT) ? 1 : 0;
+  uint8_t flags       = u2Peer.linked ? gTopHubTelem.state_flags : 0;
+  int     homed       = (flags & STATE_FLAG_HOMED) ? 1 : 0;
+  int     calibrated  = (flags & STATE_FLAG_CALIBRATED) ? 1 : 0;
+  int     spasm       = (flags & STATE_FLAG_SPASM_STOP) ? 1 : 0;
+  int     hardLock    = (flags & STATE_FLAG_HARDSTOP_LOCKED) ? 1 : 0;
+  int     busyHoming  = ((flags & STATE_FLAG_BUSY_HOMING) || pendingAutoHome || manualSetupOp == OP_SETUP_FULL_25S) ? 1 : 0;
+  int     positioning = (flags & STATE_FLAG_POSITIONING) ? 1 : 0;
+  int     faultLock   = (flags & STATE_FLAG_FAULT_LOCKOUT) ? 1 : 0;
+  int     setupWarn   = isSetupMotionWarningActive(flags) ? 1 : 0;
+  const char* setupStateStr = setupPhaseName(setupPhase);
+  if (setupPhase == SETUP_NONE && (flags & STATE_FLAG_BUSY_HOMING)) {
+    setupStateStr = "autohoming";
+  } else if (setupPhase == SETUP_NONE && positioning) {
+    setupStateStr = "moving_to_start";
+  }
 
-  char buf[896];
+  char buf[1024];
   if (isCyclingMode(gSession.opMode, gSession.modeName)) {
     bool enc2On = u3Peer.linked && ((gCyclingTelem.pedal_state_flags & CYCLE_FLAG_ENC2_ACTIVE) != 0);
     snprintf(
@@ -679,7 +785,9 @@ void sendTelemetryFrame() {
       "\"stepper_angle_deg\":%.2f,\"stepper_steps\":%ld,"
       "\"u3_linked\":%d,\"enc2_active\":%d,\"user_pedal_torque\":%.2f,\"user_power_watts\":%.1f,"
       "\"u2_linked\":%d,\"homed\":%d,\"calibrated\":%d,\"spasm\":%d,\"hardstop_locked\":%d,"
-      "\"busy_homing\":%d,\"fault_lockout\":%d,\"knee_angle_deg\":%.1f,\"knee_vel_deg_s\":%.1f,"
+      "\"busy_homing\":%d,\"positioning\":%d,\"fault_lockout\":%d,"
+      "\"setup_state\":\"%s\",\"setup_warning\":%d,\"setup_target_deg\":%.1f,"
+      "\"knee_angle_deg\":%.1f,\"knee_vel_deg_s\":%.1f,"
       "\"motor_current_a\":%.2f,\"vbus_v\":%.2f,\"rom_min_deg\":%.1f,\"rom_max_deg\":%.1f,"
       "\"target_vel_deg_s\":%.1f,\"last_rep_work_j\":%.2f,"
       "\"reps\":%d,\"estop\":%d,\"paused\":%d,\"uptime_ms\":%lu}",
@@ -701,7 +809,11 @@ void sendTelemetryFrame() {
       spasm,
       hardLock,
       busyHoming,
+      positioning,
       faultLock,
+      setupStateStr,
+      setupWarn,
+      setupTargetDeg,
       gSession.kneeAngleDeg,
       u2Peer.linked ? gTopHubTelem.knee_vel_deg_s : 0.0f,
       u2Peer.linked ? gTopHubTelem.motor_current_amps : 0.0f,
@@ -729,7 +841,8 @@ void sendTelemetryFrame() {
       "\"knee_angle_deg\":%.1f,\"rom_min_deg\":%.1f,\"rom_max_deg\":%.1f,\"target_vel_deg_s\":%.1f,"
       "\"completed_reps\":%d,\"target_reps\":%d,\"reps_remaining\":%d,\"estop\":%d,\"paused\":%d,"
       "\"u2_linked\":%d,\"homed\":%d,\"calibrated\":%d,\"spasm\":%d,\"hardstop_locked\":%d,"
-      "\"busy_homing\":%d,\"fault_lockout\":%d,\"state_flags\":%u,"
+      "\"busy_homing\":%d,\"positioning\":%d,\"fault_lockout\":%d,\"state_flags\":%u,"
+      "\"setup_state\":\"%s\",\"setup_warning\":%d,\"setup_target_deg\":%.1f,"
       "\"knee_vel_deg_s\":%.1f,\"pad_force_n\":%.1f,"
       "\"motor_current_a\":%.2f,\"vbus_v\":%.2f,\"chopper_pct\":%.1f,"
       "\"last_rep_work_j\":%.2f,\"last_rep_peak_ext_nm\":%.2f,\"last_rep_peak_flex_nm\":%.2f,"
@@ -758,8 +871,12 @@ void sendTelemetryFrame() {
       spasm,
       hardLock,
       busyHoming,
+      positioning,
       faultLock,
       (unsigned)flags,
+      setupStateStr,
+      setupWarn,
+      setupTargetDeg,
       u2Peer.linked ? gTopHubTelem.knee_vel_deg_s : 0.0f,
       u2Peer.linked ? gTopHubTelem.pad_force_newtons : 0.0f,
       u2Peer.linked ? gTopHubTelem.motor_current_amps : 0.0f,
@@ -807,6 +924,8 @@ void startSessionCommon(uint8_t targetOpMode) {
   u2FaultNotified        = false;
   pendingAutoHome        = false;
   manualSetupOp          = OP_IDLE;
+  setupPhase             = SETUP_NONE;
+  sawU2Positioning       = false;
 
   if (isCyclingMode(gSession.opMode, gSession.modeName)) {
     gSession.rpm          = 66.0f;
@@ -821,19 +940,47 @@ void startSessionCommon(uint8_t targetOpMode) {
   gSession.kneeAngleDeg = u2Peer.linked ? gTopHubTelem.knee_angle_deg : gSession.romMinDeg;
   gSession.liveTorqueNm = u2Peer.linked ? fabsf(gTopHubTelem.knee_torque_nm) : (gSession.targetTorqueNm * 0.5f);
 
-  bool u2NeedsHome = u2Peer.linked && ((gTopHubTelem.state_flags & STATE_FLAG_HOMED) == 0);
-  if (u2NeedsHome) {
+  if (u2Peer.linked) {
+    bool u2Homed = (gTopHubTelem.state_flags & STATE_FLAG_HOMED) != 0;
+    if (!u2Homed) {
 #if AUTO_HOME_U2_ON_START
-    pendingAutoHome   = true;
-    postHomeOpMode    = gSession.opMode;
-    autoHomeStartedMs = millis();
-    sawU2BusyHoming   = false;
-    Serial.println("[U2] Unhomed on start — running OP_SETUP_QUICK_6S Auto-Home first...");
-    sendWsAck(true, "Homing Top-Hub to 0 deg before starting therapy...");
+      pendingAutoHome   = true;
+      postHomeOpMode    = gSession.opMode;
+      autoHomeStartedMs = millis();
+      sawU2BusyHoming   = false;
+      Serial.println("[U2] Unhomed on start — running OP_SETUP_QUICK_6S Auto-Home first...");
+      sendWsAck(true, "Homing Top-Hub to 0 deg before starting therapy...", "warning");
+      syncAllNodesImmediate(2);
 #else
-    Serial.println("[U2] WARNING: Top-Hub is unhomed — run autohome/HOME first");
-    sendWsAck(false, "Top-Hub is unhomed — send HOME command first.");
+      gSession.active = false;
+      gSession.paused = true;
+      setupPhase      = SETUP_NONE;
+      Serial.println("[U2] Blocked start: Top-Hub is unhomed (H:0) -> require Set 0 deg Home or Auto-Home");
+      sendWsAck(true, "Top-Hub is unhomed (H:0). Click Set 0 deg Home (if at 0 deg stop) or Auto-Home (STOP1) first.", "warning");
+      syncAllNodesImmediate(2);
 #endif
+      return;
+    }
+
+    if ((gTopHubTelem.state_flags & (STATE_FLAG_SPASM_STOP | STATE_FLAG_FAULT_LOCKOUT | STATE_FLAG_HARDSTOP_LOCKED)) != 0) {
+      sendRehabCommand(NODE_TOPHUB, OP_IDLE, ESTOP_HARD_STOP_RELEASE, STEP_ACT_NONE, false, 2);
+      delay(6);
+    }
+
+    if (gTopHubTelem.knee_angle_deg < (gSession.romMinDeg - 4.0f) ||
+        gTopHubTelem.knee_angle_deg > (gSession.romMaxDeg + 4.0f)) {
+      gSession.active  = true;
+      gSession.paused  = true;
+      setupPhase       = SETUP_MOVING_TO_START;
+      setupTargetDeg   = gSession.romMinDeg;
+      setupStartedMs   = millis();
+      sawU2Positioning = false;
+      Serial.printf("[U2] Arm at %.1f deg -> slow setup move to %.1f deg\n",
+                    gTopHubTelem.knee_angle_deg, setupTargetDeg);
+      sendWsAck(true, "Setup in progress — moving arm slowly to starting position. Please stay away!", "warning");
+      syncAllNodesImmediate(2);
+      return;
+    }
   }
 
   syncAllNodesImmediate(2);
@@ -884,10 +1031,11 @@ void handleWebsiteJson(const String& payload) {
     }
 
     float velVal = 0.0f;
-    if (jsonGetFloat(payload, "target_vel_deg_s", velVal) && velVal > 0.0f) {
+    bool hasVel = jsonGetFloat(payload, "target_vel_deg_s", velVal) && velVal > 0.0f;
+    if (hasVel) {
       gSession.targetVelDegS = velVal;
     } else {
-      gSession.targetVelDegS = (nextOp == OP_CPM) ? 18.0f : (nextOp == OP_ISOKINETIC ? 45.0f : 60.0f);
+      gSession.targetVelDegS = (nextOp == OP_CPM) ? 18.0f : (nextOp == OP_ISOKINETIC ? 45.0f : (nextOp == OP_ISOMETRIC ? 150.0f : 60.0f));
     }
 
     float repsVal = 0.0f;
@@ -895,9 +1043,22 @@ void handleWebsiteJson(const String& payload) {
       gSession.targetReps = (int)clampf(repsVal, 1.0f, 99.0f);
     }
 
-    float rMin = 0.0f, rMax = 110.0f;
-    if (jsonGetFloat(payload, "rom_min_deg", rMin)) gSession.romMinDeg = clampf(rMin, 0.0f, 170.0f);
-    if (jsonGetFloat(payload, "rom_max_deg", rMax)) gSession.romMaxDeg = clampf(rMax, gSession.romMinDeg + 10.0f, 180.0f);
+    float rMin = 120.0f, rMax = 180.0f;
+    bool hasRMin = jsonGetFloat(payload, "rom_min_deg", rMin);
+    bool hasRMax = jsonGetFloat(payload, "rom_max_deg", rMax);
+    if (!isCyclingMode(nextOp, gSession.modeName)) {
+      gSession.romMinDeg = clampf(hasRMin ? rMin : gSession.romMinDeg, 120.0f, 170.0f);
+      gSession.romMaxDeg = clampf(hasRMax ? rMax : gSession.romMaxDeg, gSession.romMinDeg + 10.0f, 180.0f);
+      if (nextOp == OP_ISOMETRIC) {
+        if (!hasVel) gSession.targetVelDegS = 150.0f;
+        gSession.targetVelDegS = clampf(gSession.targetVelDegS, gSession.romMinDeg, gSession.romMaxDeg);
+      } else {
+        gSession.targetVelDegS = clampf(gSession.targetVelDegS, 3.0f, 180.0f);
+      }
+    } else {
+      if (hasRMin) gSession.romMinDeg = clampf(rMin, 0.0f, 170.0f);
+      if (hasRMax) gSession.romMaxDeg = clampf(rMax, gSession.romMinDeg + 10.0f, 180.0f);
+    }
 
     float dOff = 0.0f, lLeg = 0.0f;
     if (jsonGetFloat(payload, "L_leg_m", lLeg) && lLeg >= 0.15f && lLeg <= 0.60f) {
@@ -948,16 +1109,22 @@ void handleWebsiteJson(const String& payload) {
       gSession.opMode = OP_ACTIVE_ASSIST;
     }
 
-    float rMin = 0.0f, rMax = 0.0f;
-    if (jsonGetFloat(payload, "rom_min_deg", rMin)) {
-      gSession.romMinDeg = clampf(rMin, 0.0f, 170.0f);
-    }
-    if (jsonGetFloat(payload, "rom_max_deg", rMax)) {
-      gSession.romMaxDeg = clampf(rMax, gSession.romMinDeg + 10.0f, 180.0f);
+    float rMin = 120.0f, rMax = 180.0f;
+    bool hasRMin = jsonGetFloat(payload, "rom_min_deg", rMin);
+    bool hasRMax = jsonGetFloat(payload, "rom_max_deg", rMax);
+    if (!isCyclingMode(gSession.opMode, gSession.modeName)) {
+      gSession.romMinDeg = clampf(hasRMin ? rMin : gSession.romMinDeg, 120.0f, 170.0f);
+      gSession.romMaxDeg = clampf(hasRMax ? rMax : gSession.romMaxDeg, gSession.romMinDeg + 10.0f, 180.0f);
+    } else {
+      if (hasRMin) gSession.romMinDeg = clampf(rMin, 0.0f, 170.0f);
+      if (hasRMax) gSession.romMaxDeg = clampf(rMax, gSession.romMinDeg + 10.0f, 180.0f);
     }
     float velVal = 0.0f;
     if (jsonGetFloat(payload, "target_vel_deg_s", velVal) && velVal > 0.0f) {
       gSession.targetVelDegS = clampf(velVal, 3.0f, 180.0f);
+    }
+    if (!isCyclingMode(gSession.opMode, gSession.modeName) && gSession.opMode == OP_ISOMETRIC) {
+      gSession.targetVelDegS = clampf(gSession.targetVelDegS, gSession.romMinDeg, gSession.romMaxDeg);
     }
     float repsVal = 0.0f;
     if (jsonGetFloat(payload, "target_reps", repsVal) && repsVal >= 1.0f) {
@@ -1013,6 +1180,70 @@ void handleWebsiteJson(const String& payload) {
     return;
   }
 
+  if (cmdType == "begin_exercise") {
+    if (gSession.estopped) {
+      sendWsAck(true, "Hard-Stop is engaged — release Hard-Stop before beginning exercise.", "warning");
+      sendTelemetryFrame();
+      return;
+    }
+    bool readyByPos = (setupPhase == SETUP_READY_AT_START) ||
+                      (gSession.active && gSession.paused && setupPhase == SETUP_NONE &&
+                       (!u2Peer.linked ||
+                        (gTopHubTelem.knee_angle_deg >= gSession.romMinDeg - 5.0f &&
+                         gTopHubTelem.knee_angle_deg <= gSession.romMaxDeg + 5.0f)));
+    if (readyByPos) {
+      setupPhase             = SETUP_NONE;
+      sawU2Positioning       = false;
+      gSession.active        = true;
+      gSession.paused        = false;
+      gSession.completedReps = 0;
+      gSession.cycleProgress = 0.0f;
+      gSession.activeMs      = 0;
+      topHubRepBaseline      = u2Peer.linked ? gTopHubTelem.current_rep : 0;
+      repLimitAutoStopped    = false;
+      u2FaultNotified        = false;
+      syncAllNodesImmediate(2);
+      sendWsAck(true, "Exercise started!", "info");
+      logCommandState("begin_exercise");
+    } else {
+      sendWsAck(true, "Arm is not yet at starting position — wait for setup positioning to complete.", "warning");
+    }
+    sendTelemetryFrame();
+    return;
+  }
+
+  if (cmdType == "park_home") {
+    if (gSession.estopped) {
+      sendWsAck(true, "Release Hard-Stop before returning arm to 0 deg Park.", "warning");
+      sendTelemetryFrame();
+      return;
+    }
+    if (u2Peer.linked && !(gTopHubTelem.state_flags & STATE_FLAG_HOMED)) {
+      sendWsAck(true, "Top-Hub is unhomed (H:0) — use Auto-Home (STOP1) to seek 0 deg.", "warning");
+      sendTelemetryFrame();
+      return;
+    }
+    if (u2Peer.linked &&
+        (gTopHubTelem.state_flags & (STATE_FLAG_SPASM_STOP | STATE_FLAG_FAULT_LOCKOUT | STATE_FLAG_HARDSTOP_LOCKED)) != 0) {
+      sendRehabCommand(NODE_TOPHUB, OP_IDLE, ESTOP_HARD_STOP_RELEASE, STEP_ACT_NONE, false, 2);
+      delay(6);
+    }
+    gSession.active       = false;
+    gSession.paused       = true;
+    gSession.liveTorqueNm = 0.0f;
+    pendingAutoHome       = false;
+    manualSetupOp         = OP_IDLE;
+    setupPhase            = SETUP_PARKING_HOME;
+    setupTargetDeg        = 0.0f;
+    setupStartedMs        = millis();
+    sawU2Positioning      = false;
+    syncAllNodesImmediate(2);
+    sendWsAck(true, "Returning arm slowly to 0 deg Park — please stay away!", "warning");
+    logCommandState("park_home");
+    sendTelemetryFrame();
+    return;
+  }
+
   if (cmdType == "pause_session") {
     gSession.paused = true;
     syncAllNodesImmediate(1);
@@ -1022,9 +1253,23 @@ void handleWebsiteJson(const String& payload) {
   }
 
   if (cmdType == "resume_session") {
+    if (setupPhase == SETUP_MOVING_TO_START || setupPhase == SETUP_PARKING_HOME || setupPhase == SETUP_AUTOHOME) {
+      sendWsAck(true, "Setup movement in progress — please stay away and wait until complete.", "warning");
+      sendTelemetryFrame();
+      return;
+    }
+    if (setupPhase == SETUP_READY_AT_START) {
+      sendWsAck(true, "Arm is waiting at start — click Begin Exercise once leg is secured.", "info");
+      sendTelemetryFrame();
+      return;
+    }
     if (gSession.estopped) {
       triggerHardStopReleaseBurst();
-      delay(4);
+      delay(6);
+    } else if (u2Peer.linked &&
+               (gTopHubTelem.state_flags & (STATE_FLAG_SPASM_STOP | STATE_FLAG_FAULT_LOCKOUT | STATE_FLAG_HARDSTOP_LOCKED)) != 0) {
+      sendRehabCommand(NODE_TOPHUB, OP_IDLE, ESTOP_HARD_STOP_RELEASE, STEP_ACT_NONE, false, 2);
+      delay(6);
     }
     gSession.paused = false;
     if (!gSession.active) gSession.active = true;
@@ -1043,6 +1288,13 @@ void handleWebsiteJson(const String& payload) {
     gSession.speedKmh     = 0.0f;
     pendingAutoHome       = false;
     manualSetupOp         = OP_IDLE;
+    setupPhase            = SETUP_NONE;
+    sawU2Positioning      = false;
+    if (u2Peer.linked &&
+        (gTopHubTelem.state_flags & (STATE_FLAG_SPASM_STOP | STATE_FLAG_FAULT_LOCKOUT)) != 0) {
+      sendRehabCommand(NODE_TOPHUB, OP_IDLE, ESTOP_HARD_STOP_RELEASE, STEP_ACT_NONE, false, 2);
+      delay(4);
+    }
     syncAllNodesImmediate(2);
     logCommandState("stop_session");
     sendTelemetryFrame();
@@ -1060,6 +1312,8 @@ void handleWebsiteJson(const String& payload) {
       gSession.speedKmh     = 0.0f;
       pendingAutoHome       = false;
       manualSetupOp         = OP_IDLE;
+      setupPhase            = SETUP_NONE;
+      sawU2Positioning      = false;
       syncAllNodesImmediate(3); // 3-packet burst for <3ms E-Stop
     } else {
       triggerHardStopReleaseBurst();
@@ -1085,13 +1339,19 @@ void handleWebsiteJson(const String& payload) {
     if (gSession.active && !gSession.paused) {
       gSession.paused = true;
     }
-    manualSetupOp       = (cmdType == "setup_full") ? OP_SETUP_FULL_25S : OP_SETUP_QUICK_6S;
+    bool isFull         = (cmdType == "setup_full");
+    manualSetupOp       = isFull ? OP_SETUP_FULL_25S : OP_SETUP_QUICK_6S;
     manualSetupStartMs  = millis();
     sawManualBusyHoming = false;
+    setupPhase          = isFull ? SETUP_AUTOHOME : SETUP_NONE;
+    setupTargetDeg      = 0.0f;
+    setupStartedMs      = millis();
+    sawU2Positioning    = false;
     syncAllNodesImmediate(2);
-    sendWsAck(true, (cmdType == "setup_full")
-      ? "Running motorized Auto-Home toward STOP1 on Top-Hub..."
-      : "Latching 0.0° Home & ACS712 zero on Top-Hub...");
+    sendWsAck(true, isFull
+      ? "Setup in progress — Auto-Homing arm toward 0 deg STOP1. Please stay away!"
+      : "Latching 0.0° Home & ACS712 zero on Top-Hub...",
+      isFull ? "warning" : "info");
     logCommandState(cmdType.c_str());
     sendTelemetryFrame();
     return;
@@ -1121,9 +1381,13 @@ void onWebSocketEvent(uint8_t clientNum, WStype_t type, uint8_t* payload, size_t
     }
     case WStype_DISCONNECTED:
       Serial.printf("[WS #%u] Client disconnected\n", clientNum);
-      if (webSocket.connectedClients() == 0 && gSession.active) {
+      if (webSocket.connectedClients() == 0 && (gSession.active || setupPhase != SETUP_NONE)) {
         gSession.paused       = true;
         gSession.liveTorqueNm = 0.0f;
+        pendingAutoHome       = false;
+        manualSetupOp         = OP_IDLE;
+        setupPhase            = SETUP_NONE;
+        sawU2Positioning      = false;
         syncAllNodesImmediate(2);
         logCommandState("ws_all_clients_disconnected_pause");
       }
@@ -1240,8 +1504,9 @@ void printSerialHelp() {
   Serial.println("  ASSIST [deg_s] [Nm]        : Start Active Assist (OP_ACTIVE_ASSIST=11, e.g. 'ASSIST 25 12')");
   Serial.println("  ISO [ext_Nm] [flex_Nm]     : Start Isotonic Mode (OP_ISOTONIC=4, e.g. 'ISO 18 12')");
   Serial.println("  ISOK [deg_s] [cap_Nm]      : Start Isokinetic Mode (OP_ISOKINETIC=5, e.g. 'ISOK 45 25')");
-  Serial.println("  ISOM [hold_deg] [cap_Nm]   : Start Isometric Hold (OP_ISOMETRIC=6, e.g. 'ISOM 60 20')");
-  Serial.println("  ROM <min_deg> <max_deg>    : Set Flexion ROM window (e.g. 'ROM 0 110')");
+  Serial.println("  ISOM [hold_deg] [cap_Nm]   : Start Isometric Hold (OP_ISOMETRIC=6, e.g. 'ISOM 150 20')");
+  Serial.println("  ROM <min_deg> <max_deg>    : Set Flexion ROM window (e.g. 'ROM 120 180')");
+  Serial.println("  BEGIN | PARK               : Begin exercise after 120 deg setup or slow-park to 0 deg");
   Serial.println("  SPEED <deg_s>              : Set target velocity deg/s (e.g. 'SPEED 25')");
   Serial.println("  TORQUE <ext_Nm> [flex_Nm]  : Set target torque live (e.g. 'TORQUE 16 10')");
   Serial.println("  PWM <signed_pct>           : Direct PWM test on U2 (-60..+60, 0 to stop)");
@@ -1343,6 +1608,8 @@ void handleSerialCommands() {
     manualSetupOp       = OP_SETUP_QUICK_6S;
     manualSetupStartMs  = millis();
     sawManualBusyHoming = false;
+    setupPhase          = SETUP_NONE;
+    sawU2Positioning    = false;
     syncAllNodesImmediate(2);
     sendTelemetryFrame();
     Serial.println("[ESP-NOW TX] Triggered OP_SETUP_QUICK_6S (0.0 deg Home + ACS712 zero) on U2");
@@ -1351,6 +1618,10 @@ void handleSerialCommands() {
     manualSetupOp       = OP_SETUP_FULL_25S;
     manualSetupStartMs  = millis();
     sawManualBusyHoming = false;
+    setupPhase          = SETUP_AUTOHOME;
+    setupTargetDeg      = 0.0f;
+    setupStartedMs      = millis();
+    sawU2Positioning    = false;
     syncAllNodesImmediate(2);
     sendTelemetryFrame();
     Serial.println("[ESP-NOW TX] Triggered OP_SETUP_FULL_25S (motorized STOP1 Auto-Home) on U2");
@@ -1415,24 +1686,27 @@ void handleSerialCommands() {
     logCommandState("serial_isok");
     sendTelemetryFrame();
   } else if (upper == "ISOM" || upper.startsWith("ISOM ")) {
-    float holdDeg = 60.0f, capNm = 20.0f;
+    float holdDeg = 150.0f, capNm = 20.0f;
     bool hasA = false, hasB = false;
     parseTwoFloats(line.substring(4), holdDeg, hasA, capNm, hasB);
     strcpy(gSession.modeName, "isometric");
     strcpy(gSession.role, "resistance");
-    gSession.targetVelDegS      = clampf(hasA ? holdDeg : 60.0f, gSession.romMinDeg, gSession.romMaxDeg);
+    gSession.targetVelDegS      = clampf(hasA ? holdDeg : 150.0f, gSession.romMinDeg, gSession.romMaxDeg);
     gSession.targetTorqueNm     = clampf(hasB ? capNm : 20.0f, 1.0f, 45.0f);
     gSession.targetTorqueFlexNm = gSession.targetTorqueNm;
     startSessionCommon(OP_ISOMETRIC);
     logCommandState("serial_isom");
     sendTelemetryFrame();
   } else if (upper.startsWith("ROM ")) {
-    float rMin = 0.0f, rMax = 110.0f;
+    float rMin = 120.0f, rMax = 180.0f;
     bool hasA = false, hasB = false;
     parseTwoFloats(line.substring(4), rMin, hasA, rMax, hasB);
     if (hasA && hasB) {
-      gSession.romMinDeg = clampf(rMin, 0.0f, 170.0f);
+      gSession.romMinDeg = clampf(rMin, 120.0f, 170.0f);
       gSession.romMaxDeg = clampf(rMax, gSession.romMinDeg + 10.0f, 180.0f);
+      if (gSession.opMode == OP_ISOMETRIC) {
+        gSession.targetVelDegS = clampf(gSession.targetVelDegS, gSession.romMinDeg, gSession.romMaxDeg);
+      }
       syncAllNodesImmediate(2);
       sendTelemetryFrame();
       Serial.printf("[ROM] Updated ROM window -> %.1f .. %.1f deg\n", gSession.romMinDeg, gSession.romMaxDeg);
@@ -1509,22 +1783,82 @@ void handleSerialCommands() {
     startSessionCommon(op);
     logCommandState("serial_flex");
     sendTelemetryFrame();
+  } else if (upper == "BEGIN") {
+    if (gSession.estopped) {
+      Serial.println("[SERIAL] Cannot BEGIN while E-Stop is active. Run RELEASE first.");
+    } else if (setupPhase == SETUP_READY_AT_START ||
+               (gSession.active && gSession.paused && setupPhase == SETUP_NONE &&
+                (!u2Peer.linked ||
+                 (gTopHubTelem.knee_angle_deg >= gSession.romMinDeg - 5.0f &&
+                  gTopHubTelem.knee_angle_deg <= gSession.romMaxDeg + 5.0f)))) {
+      setupPhase             = SETUP_NONE;
+      sawU2Positioning       = false;
+      gSession.active        = true;
+      gSession.paused        = false;
+      gSession.completedReps = 0;
+      gSession.cycleProgress = 0.0f;
+      gSession.activeMs      = 0;
+      topHubRepBaseline      = u2Peer.linked ? gTopHubTelem.current_rep : 0;
+      repLimitAutoStopped    = false;
+      u2FaultNotified        = false;
+      syncAllNodesImmediate(2);
+      sendWsAck(true, "Exercise started!", "info");
+      logCommandState("serial_begin");
+      sendTelemetryFrame();
+      Serial.println("[SERIAL] Exercise STARTED");
+    } else {
+      Serial.println("[SERIAL] Arm not ready at start position yet.");
+    }
+  } else if (upper == "PARK") {
+    if (gSession.estopped) {
+      Serial.println("[SERIAL] Cannot PARK while E-Stop is active. Run RELEASE first.");
+    } else if (u2Peer.linked && !(gTopHubTelem.state_flags & STATE_FLAG_HOMED)) {
+      Serial.println("[SERIAL] Top-Hub is unhomed (H:0). Run AUTOHOME first.");
+    } else {
+      if (u2Peer.linked &&
+          (gTopHubTelem.state_flags & (STATE_FLAG_SPASM_STOP | STATE_FLAG_FAULT_LOCKOUT | STATE_FLAG_HARDSTOP_LOCKED)) != 0) {
+        sendRehabCommand(NODE_TOPHUB, OP_IDLE, ESTOP_HARD_STOP_RELEASE, STEP_ACT_NONE, false, 2);
+        delay(6);
+      }
+      gSession.active       = false;
+      gSession.paused       = true;
+      gSession.liveTorqueNm = 0.0f;
+      pendingAutoHome       = false;
+      manualSetupOp         = OP_IDLE;
+      setupPhase            = SETUP_PARKING_HOME;
+      setupTargetDeg        = 0.0f;
+      setupStartedMs        = millis();
+      sawU2Positioning      = false;
+      syncAllNodesImmediate(2);
+      sendWsAck(true, "Returning arm slowly to 0 deg Park — please stay away!", "warning");
+      logCommandState("serial_park");
+      sendTelemetryFrame();
+      Serial.println("[ESP-NOW TX] Returning U2 slowly to 0 deg Park (OP_PARK_HOME)");
+    }
   } else if (upper == "PAUSE") {
     gSession.paused = true;
     syncAllNodesImmediate(2);
     logCommandState("serial_pause");
     sendTelemetryFrame();
   } else if (upper == "RESUME") {
-    if (gSession.estopped) {
-      triggerHardStopReleaseBurst();
-      delay(4);
+    if (setupPhase != SETUP_NONE) {
+      Serial.println("[SERIAL] Setup phase active — wait for setup or type BEGIN / END.");
+    } else {
+      if (gSession.estopped) {
+        triggerHardStopReleaseBurst();
+        delay(6);
+      } else if (u2Peer.linked &&
+                 (gTopHubTelem.state_flags & (STATE_FLAG_SPASM_STOP | STATE_FLAG_FAULT_LOCKOUT | STATE_FLAG_HARDSTOP_LOCKED)) != 0) {
+        sendRehabCommand(NODE_TOPHUB, OP_IDLE, ESTOP_HARD_STOP_RELEASE, STEP_ACT_NONE, false, 2);
+        delay(6);
+      }
+      gSession.paused = false;
+      if (!gSession.active) gSession.active = true;
+      u2FaultNotified = false;
+      syncAllNodesImmediate(2);
+      logCommandState("serial_resume");
+      sendTelemetryFrame();
     }
-    gSession.paused = false;
-    if (!gSession.active) gSession.active = true;
-    u2FaultNotified = false;
-    syncAllNodesImmediate(2);
-    logCommandState("serial_resume");
-    sendTelemetryFrame();
   } else if (upper == "END" || upper == "STOP") {
     gSession.active       = false;
     gSession.paused       = true;
@@ -1533,6 +1867,13 @@ void handleSerialCommands() {
     gSession.speedKmh     = 0.0f;
     pendingAutoHome       = false;
     manualSetupOp         = OP_IDLE;
+    setupPhase            = SETUP_NONE;
+    sawU2Positioning      = false;
+    if (u2Peer.linked &&
+        (gTopHubTelem.state_flags & (STATE_FLAG_SPASM_STOP | STATE_FLAG_FAULT_LOCKOUT)) != 0) {
+      sendRehabCommand(NODE_TOPHUB, OP_IDLE, ESTOP_HARD_STOP_RELEASE, STEP_ACT_NONE, false, 2);
+      delay(4);
+    }
     syncAllNodesImmediate(2);
     logCommandState("serial_end");
     sendTelemetryFrame();
@@ -1554,6 +1895,8 @@ void handleSerialCommands() {
     gSession.liveTorqueNm = 0.0f;
     pendingAutoHome       = false;
     manualSetupOp         = OP_IDLE;
+    setupPhase            = SETUP_NONE;
+    sawU2Positioning      = false;
     syncAllNodesImmediate(3);
     sendTelemetryFrame();
     Serial.println("HW/Serial E-Stop ENGAGED (U2 Hard-Stop Locked, U3 Unloaded)");
@@ -1679,6 +2022,8 @@ void loop() {
     gSession.liveTorqueNm = 0.0f;
     pendingAutoHome       = false;
     manualSetupOp         = OP_IDLE;
+    setupPhase            = SETUP_NONE;
+    sawU2Positioning      = false;
     syncAllNodesImmediate(3);
     logCommandState("hw_gpio4_estop");
     sendTelemetryFrame();
@@ -1691,7 +2036,7 @@ void loop() {
 
   updateRehabKinematics(dt);
 
-  uint32_t wsPeriod = (gSession.active || pendingAutoHome || manualSetupOp != OP_IDLE)
+  uint32_t wsPeriod = (gSession.active || pendingAutoHome || manualSetupOp != OP_IDLE || setupPhase != SETUP_NONE)
                         ? TELEMETRY_PERIOD_MS
                         : 250;
   if (now - lastTelemetryMs >= wsPeriod) {

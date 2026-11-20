@@ -1284,6 +1284,37 @@ a:focus-visible {
 
 
 /* Top-Hub Hardware Status & Kinematics Extensions */
+.exercise-mode-indicator.live,
+.pill-status.live {
+  background: var(--connected-bg);
+  color: var(--connected-ink);
+}
+
+.pill-status.demo {
+  background: var(--warm-pill);
+  color: var(--warm-ink);
+}
+
+.clinical-flexion-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.clinical-flexion-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.clinical-flexion-chip.warn {
+  background: var(--warm-pill);
+  border-color: #e5c687;
+  color: var(--warm-ink);
+}
+
 .tophub-hw-card {
   margin-bottom: 24px;
 }
@@ -1306,6 +1337,7 @@ a:focus-visible {
 }
 
 .tophub-rom-meter {
+  position: relative;
   width: 100%;
   height: 8px;
   border-radius: 999px;
@@ -1314,12 +1346,168 @@ a:focus-visible {
   margin: 12px 0 8px;
 }
 
+.tophub-rom-meter::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 66.67%;
+  width: 2px;
+  background: rgba(19, 33, 0, 0.35);
+}
+
 .tophub-rom-fill {
   height: 100%;
   width: 0%;
   border-radius: 999px;
   background: linear-gradient(90deg, #3f580c, #698f1c);
   transition: width 0.14s ease;
+}
+
+/* Prominent Setup Warning, Ready-to-Begin, Unhomed & Spasm Safety Banner */
+.setup-safety-banner {
+  margin-bottom: 24px;
+  border-radius: 12px;
+  padding: 18px 22px;
+  border: 2px solid #e5c687;
+  background: #fff7e0;
+  color: #4d3507;
+  display: grid;
+  gap: 14px;
+  box-shadow: 0 10px 26px rgba(114, 88, 27, 0.1);
+}
+
+.setup-safety-banner.is-warning {
+  border-color: #d96b27;
+  background: #fff2e8;
+  color: #6b2507;
+}
+
+.setup-safety-banner.is-spasm {
+  border-color: #c84228;
+  background: var(--danger-bg);
+  color: var(--danger-ink);
+}
+
+.setup-safety-banner.is-ready {
+  border-color: var(--olive);
+  background: #eaf4dc;
+  color: var(--ink);
+}
+
+.setup-safety-banner.is-unhomed {
+  border-color: #d6b15a;
+  background: var(--warm-pill);
+  color: var(--warm-ink);
+}
+
+.setup-banner-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.setup-banner-badge {
+  flex-shrink: 0;
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(19, 33, 0, 0.1);
+}
+
+.setup-safety-banner.is-warning .setup-banner-badge {
+  background: #d94c1a;
+  color: #ffffff;
+  animation: setupPulse 1.2s ease-in-out infinite;
+}
+
+.setup-safety-banner.is-spasm .setup-banner-badge {
+  background: #b92c14;
+  color: #ffffff;
+}
+
+.setup-safety-banner.is-ready .setup-banner-badge {
+  background: var(--olive);
+  color: #ffffff;
+}
+
+@keyframes setupPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.72; transform: scale(0.97); }
+}
+
+.setup-banner-copy strong {
+  display: block;
+  font-size: 16px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.setup-banner-copy p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.setup-banner-progress {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.setup-banner-progress-track {
+  flex: 1 1 220px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.setup-banner-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #d96b27, #e5933a);
+  transition: width 0.16s ease;
+}
+
+.setup-banner-progress-text {
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.setup-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.exercise-history-meta {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.exercise-history-stats {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.exercise-stat-pill {
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: var(--tile);
+  color: var(--olive);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .tophub-hw-note {
