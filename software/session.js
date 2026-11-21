@@ -1,6 +1,7 @@
 const $ = (id) => document.getElementById(id);
 const video = $("backgroundVideo");
-const youtubeFrame = $("youtubeBackground");
+const videoPlayButton = $("videoPlayButton");
+const VIDEO_START_OFFSET_SEC = 15;
 
 const CYCLING_MODES = {
   torque: {
@@ -566,16 +567,45 @@ function stopRideClock() {
   rideClockTimer = null;
 }
 
-function controlBackgroundPlayback(play) {
-  if (video && video.src) {
-    if (play) video.play().catch(() => {});
-    else video.pause();
+function seekVideoToStartOffset() {
+  if (!video) return;
+  const dur = video.duration;
+  const targetTime = (Number.isFinite(dur) && dur > VIDEO_START_OFFSET_SEC + 1)
+    ? VIDEO_START_OFFSET_SEC
+    : 0;
+  if (Math.abs((video.currentTime || 0) - targetTime) > 0.25) {
+    try {
+      video.currentTime = targetTime;
+    } catch {}
   }
-  if (youtubeFrame?.contentWindow) {
-    youtubeFrame.contentWindow.postMessage(
-      JSON.stringify({ event: "command", func: play ? "playVideo" : "pauseVideo", args: [] }),
-      "https://www.youtube.com"
-    );
+}
+
+function attemptVideoPlay() {
+  if (!video || !video.getAttribute("src")) return;
+  const playPromise = video.play();
+  if (playPromise && typeof playPromise.then === "function") {
+    playPromise
+      .then(() => {
+        if (videoPlayButton) videoPlayButton.hidden = true;
+      })
+      .catch(() => {
+        if (videoPlayButton && rideStarted && !paused && !ended) {
+          videoPlayButton.hidden = false;
+        }
+      });
+  }
+}
+
+function controlBackgroundPlayback(play) {
+  if (!video || !video.getAttribute("src")) return;
+  if (play) {
+    if (video.readyState >= 1 && video.currentTime < VIDEO_START_OFFSET_SEC - 0.5) {
+      seekVideoToStartOffset();
+    }
+    attemptVideoPlay();
+  } else {
+    video.pause();
+    if (videoPlayButton) videoPlayButton.hidden = true;
   }
 }
 
@@ -653,44 +683,67 @@ function returnToModeSelector() {
 }
 
 // =========================================================================
-// SCENERY & WEBSOCKET CONNECTION
+// LOCAL SCENERY VIDEOS (software/videos/*.mp4, starting at t = 15s)
 // =========================================================================
 const SCENE_VIDEOS = {
-  forest: "https://www.youtube.com/watch?v=MWyBgudQqsI&pp=ygUYZm9yZXN0IGN5Y2xpbmcgcG92IHZpZGVv",
-  beach: "https://www.youtube.com/watch?v=YOUR_BEACH_ID",
-  nightCity: "https://www.youtube.com/watch?v=XX8km2vJbkQ&pp=ygUTdG9reW8gbmlnaHQgY3ljbGluZw%3D%3D",
-  mountains: "https://www.youtube.com/shorts/1euzUN4eSkE"
+  forest: "videos/forest.mp4",
+  beach: "videos/beach.mp4",
+  nightCity: "videos/night.mp4",
+  mountains: "videos/mountain.mp4"
 };
 
-function getYouTubeID(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.hostname.includes("youtu.be")) return parsed.pathname.substring(1);
-    if (parsed.hostname.includes("youtube.com")) {
-      if (parsed.pathname === "/watch") return parsed.searchParams.get("v");
-      if (parsed.pathname.startsWith("/embed/") || parsed.pathname.startsWith("/shorts/")) {
-        return parsed.pathname.split("/")[2];
-      }
+let currentSceneSrc = "";
+
+if (video) {
+  video.addEventListener("loadedmetadata", () => {
+    seekVideoToStartOffset();
+    if (rideStarted && !paused && !ended) {
+      attemptVideoPlay();
     }
-  } catch (error) {
-    console.error("Invalid YouTube URL", error);
-  }
-  return null;
+  });
+
+  video.addEventListener("seeked", () => {
+    video.classList.remove("is-switching");
+  });
+
+  video.addEventListener("canplay", () => {
+    video.classList.remove("is-switching");
+  });
+
+  // Loop cleanly back to t = 15s instead of 0:00
+  video.addEventListener("ended", () => {
+    if (!rideStarted || paused || ended) return;
+    seekVideoToStartOffset();
+    attemptVideoPlay();
+  });
+}
+
+if (videoPlayButton) {
+  videoPlayButton.addEventListener("click", () => {
+    if (video && video.currentTime < VIDEO_START_OFFSET_SEC - 0.5) {
+      seekVideoToStartOffset();
+    }
+    attemptVideoPlay();
+  });
 }
 
 function changeScene(scene) {
-  const url = SCENE_VIDEOS[scene];
-  const videoID = getYouTubeID(url);
-  if (!videoID || videoID.startsWith("YOUR_")) return;
+  const src = SCENE_VIDEOS[scene];
+  if (!video || !src) return;
 
+  if (currentSceneSrc === src && video.getAttribute("src") === src) {
+    if (video.readyState >= 1 && video.currentTime < VIDEO_START_OFFSET_SEC - 0.5) {
+      seekVideoToStartOffset();
+    }
+    if (rideStarted && !paused && !ended) attemptVideoPlay();
+    return;
+  }
+
+  currentSceneSrc = src;
+  video.classList.add("is-switching");
   video.pause();
-  video.removeAttribute("src");
+  video.src = src;
   video.load();
-
-  youtubeFrame.src =
-    `https://www.youtube.com/embed/${videoID}` +
-    `?enablejsapi=1&autoplay=1&mute=1&controls=0&loop=1` +
-    `&playlist=${videoID}&playsinline=1&rel=0`;
 }
 
 function connectEspSocket() {

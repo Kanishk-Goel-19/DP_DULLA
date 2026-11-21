@@ -141,14 +141,7 @@
 
   <!-- STAGE 2: Immersive Live Cycling HUD -->
   <main class="dashboard" id="dashboard" hidden>
-    <video id="backgroundVideo" class="background-video" autoplay muted loop playsinline></video>
-
-    <iframe id="youtubeBackground"
-            class="youtube-background"
-            allow="autoplay; encrypted-media; picture-in-picture"
-            frameborder="0"
-            referrerpolicy="strict-origin-when-cross-origin">
-    </iframe>
+    <video id="backgroundVideo" class="background-video" muted playsinline preload="metadata"></video>
     <div class="video-fallback" aria-hidden="true"></div>
     <div class="scrim"></div>
     <button class="video-play-button" id="videoPlayButton" type="button" hidden>Tap to play video</button>

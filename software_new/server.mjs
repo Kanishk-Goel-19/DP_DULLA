@@ -1,4 +1,5 @@
 import http from 'node:http'
+import { createReadStream } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -80,7 +81,7 @@ const contentType = {
   '.webm': 'video/webm',
 }
 
-async function serveStatic(res, baseDir, relativePath) {
+async function serveStatic(req, res, baseDir, relativePath) {
   let decoded
   try { decoded = decodeURIComponent(relativePath) }
   catch { return json(res, 404, { ok: false, message: 'Page not found.' }) }
@@ -91,8 +92,55 @@ async function serveStatic(res, baseDir, relativePath) {
   }
   const info = await stat(target)
   if (!info.isFile()) return json(res, 404, { ok: false, message: 'Page not found.' })
+
+  const mime = contentType[path.extname(target).toLowerCase()] || 'application/octet-stream'
+  const totalSize = info.size
+  const rangeHeader = req?.headers?.range
+
+  if (rangeHeader && totalSize > 0) {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(String(rangeHeader).trim())
+    if (!match) {
+      res.writeHead(416, { 'Content-Range': `bytes */${totalSize}` })
+      return res.end()
+    }
+    const start = match[1] ? Number(match[1]) : Math.max(0, totalSize - Number(match[2] || 0))
+    const end = match[2] ? Math.min(Number(match[2]), totalSize - 1) : totalSize - 1
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start > end || start >= totalSize) {
+      res.writeHead(416, { 'Content-Range': `bytes */${totalSize}` })
+      return res.end()
+    }
+    res.writeHead(206, {
+      'Content-Type': mime,
+      'Accept-Ranges': 'bytes',
+      'Content-Range': `bytes ${start}-${end}/${totalSize}`,
+      'Content-Length': end - start + 1,
+    })
+    const stream = createReadStream(target, { start, end })
+    res.on('close', () => stream.destroy())
+    stream.on('error', () => { if (!res.headersSent) res.writeHead(500); res.end() })
+    stream.pipe(res)
+    return
+  }
+
+  if (totalSize > 512 * 1024 || mime.startsWith('video/')) {
+    res.writeHead(200, {
+      'Content-Type': mime,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': totalSize,
+    })
+    const stream = createReadStream(target)
+    res.on('close', () => stream.destroy())
+    stream.on('error', () => { if (!res.headersSent) res.writeHead(500); res.end() })
+    stream.pipe(res)
+    return
+  }
+
   const body = await readFile(target)
-  res.writeHead(200, { 'Content-Type': contentType[path.extname(target).toLowerCase()] || 'application/octet-stream' })
+  res.writeHead(200, {
+    'Content-Type': mime,
+    'Accept-Ranges': 'bytes',
+    'Content-Length': body.length,
+  })
   res.end(body)
 }
 
@@ -304,7 +352,7 @@ export async function createAppServer(options = {}) {
 
         const deviceMode = resolveDeviceMode(token)
         if (deviceMode === 'none') {
-          if (pathname === '/device') return await serveStatic(res, publicDir, 'index.html')
+          if (pathname === '/device') return await serveStatic(req, res, publicDir, 'index.html')
           if (isEntry) { res.writeHead(302, { Location: '/dashboard' }); return res.end() }
           return json(res, 403, { ok: false, message: 'Connect ESP32 or open Demo mode from the dashboard first.' })
         }
@@ -322,12 +370,12 @@ export async function createAppServer(options = {}) {
             : pathname.startsWith('/device/flexion/')
               ? pathname.slice('/device/flexion/'.length)
               : pathname.slice('/device/'.length)
-        return await serveStatic(res, softwareDir, relPath)
+        return await serveStatic(req, res, softwareDir, relPath)
       }
 
       // Serve the single-page website (including refreshes of /dashboard, /progress etc.).
       const isPublicAsset = pathname.startsWith('/assets/') || ['/styles.css', '/exercise.css', '/app.js', '/exercise.js'].includes(pathname)
-      return await serveStatic(res, publicDir, isPublicAsset ? pathname : 'index.html')
+      return await serveStatic(req, res, publicDir, isPublicAsset ? pathname : 'index.html')
     } catch (e) {
       if (pathname.startsWith('/api/')) return responseError(res, e)
       json(res, 404, { ok: false, message: 'Page not found.' })
